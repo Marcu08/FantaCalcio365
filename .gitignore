@@ -14,3 +14,5 @@ local.properties
 # Output
 *.apk
 *.aab
+dump.sql
+*.dump

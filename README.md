@@ -103,6 +103,21 @@ supabase db push                           # applica le migrations in ordine
 supabase db query --linked "select status, count(*) from matches group by status;"
 ```
 
+### Ordine di deploy (importante!)
+1. **Prima la migration** (`supabase db push`): aggiorna `score_match`/`ingest_match_result`
+   e crea event_cache, colonne override e audit before/after.
+   ATTENZIONE: la 0008 **sostituisce** `score_match` e `ingest_match_result` (non è
+   puramente additiva). Prima del push in produzione eseguire
+   `supabase\tests\compare_old_vs_new.sql` su una giornata già chiusa e verificare
+   che punteggi v1 e v2 coincidano.
+2. **Poi le Edge Functions** (le versioni precedenti di cron-tasks chiamano
+   `cache_is_fresh` che non esisterebbe ancora, e non rispetterebbero `manual_override`):
+```powershell
+supabase functions deploy provider-proxy
+supabase functions deploy admin-override
+supabase functions deploy cron-tasks
+```
+
 ### Edge Functions
 ```powershell
 supabase functions deploy provider-proxy

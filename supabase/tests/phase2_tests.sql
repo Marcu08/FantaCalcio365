@@ -109,9 +109,10 @@ perform public.admin_override_match(
 );
 reset role;
 
--- Nuovi punteggi: 1T 2-0 errato (0), 2T 1-1 esatto (6), P4 gol x1 = 9 → 15
+-- Nuovi punteggi: 1T 2-0 errato (0), 2T 1-1 errato (0),
+-- P2 marcatore 2 reti x 10 = 20, P4 marcatore 1 rete x 9 = 9 → 29
 select assert_eq((select total from scores where user_id='dddddddd-0000-0000-0000-000000000001'),
-                 15.0::numeric, 'Override ricalcolato = 15');
+                 29.0::numeric, 'Override ricalcolato = 29');
 
 select assert_eq((select manual_override from matches where id='cccccccc-0000-0000-0000-000000000001'),
                  true, 'manual_override impostato');
@@ -211,5 +212,123 @@ begin
     raise notice 'PASS: giocatore inesistente rifiutato';
   end;
 end $$;
+
+-- =============================================================
+-- TEST 8: due gialli STESSO minuto → decide event_order del provider
+-- =============================================================
+-- Nuova partita: due gialli entrambi al minuto 10, ordini 1 e 2.
+insert into matches (id, season_id, matchday, provider_id, home_team_id, away_team_id,
+                     kickoff_at, status, locked_at,
+                     ht_home_goals, ht_away_goals, ht2_home_goals, ht2_away_goals,
+                     ft_home_goals, ft_away_goals)
+values ('cccccccc-0000-0000-0000-000000000002','11111111-1111-1111-1111-111111111111',1,'M2',
+        'aaaaaaaa-0000-0000-0000-000000000001','aaaaaaaa-0000-0000-0000-000000000002',
+        now() - interval '2 hours','FINISHED', now() - interval '3 hours',
+        0, 0,   0, 0,   0, 0);
+
+insert into match_events (match_id, event_order, minute, type, player_id) values
+  ('cccccccc-0000-0000-0000-000000000002',1,10,'YELLOW','bbbbbbbb-0000-0000-0000-000000000002'),
+  ('cccccccc-0000-0000-0000-000000000002',2,10,'YELLOW','bbbbbbbb-0000-0000-0000-000000000004');
+
+select assert_eq(public.first_yellow('cccccccc-0000-0000-0000-000000000002'),
+                 'bbbbbbbb-0000-0000-0000-000000000002'::uuid,
+                 'Gialli stesso minuto: vince event_order (ordine provider)');
+
+-- =============================================================
+-- TEST 9: giocatore mai entrato in campo = 0 punti
+-- =============================================================
+-- P5 della casa non ha statistiche di gioco (mai convocato/entrato):
+insert into players (id, team_id, provider_id, name, position) values
+  ('bbbbbbbb-0000-0000-0000-000000000005','aaaaaaaa-0000-0000-0000-000000000001','P5','Panchina Casa','FW');
+
+-- Pronostico che lo dichiara marcatore su M2 (0-0)
+insert into predictions (id, user_id, match_id, ht_home, ht_away, ht2_home, ht2_away) values
+  ('eeeeeeee-0000-0000-0000-000000000002','dddddddd-0000-0000-0000-000000000002',
+   'cccccccc-0000-0000-0000-000000000002',0,0,0,0);
+insert into prediction_players values
+  ('eeeeeeee-0000-0000-0000-000000000002','bbbbbbbb-0000-0000-0000-000000000005',true),
+  ('eeeeeeee-0000-0000-0000-000000000002','bbbbbbbb-0000-0000-0000-000000000001',false),
+  ('eeeeeeee-0000-0000-0000-000000000002','bbbbbbbb-0000-0000-0000-000000000003',false),
+  ('eeeeeeee-0000-0000-0000-000000000002','bbbbbbbb-0000-0000-0000-000000000004',false);
+
+perform public.score_match('cccccccc-0000-0000-0000-000000000002');
+
+-- Il combo 0-0 esatto vale comunque 20; ciò che DEVE essere 0 e' il bonus marcatore:
+-- P5 dichiarato ma senza statistiche (mai entrato) non contribuisce
+select assert_eq((select pts_scorers from scores
+                  where user_id='dddddddd-0000-0000-0000-000000000002'
+                    and match_id='cccccccc-0000-0000-0000-000000000002'),
+                 0.0::numeric,
+                 'Giocatore mai entrato in campo: bonus gol = 0, nessun auto-bonus');
+select assert_eq((select total from scores
+                  where user_id='dddddddd-0000-0000-0000-000000000002'
+                    and match_id='cccccccc-0000-0000-0000-000000000002'),
+                 20.0::numeric,
+                 'Totale M2 = 20 (solo combo esatto, zero bonus marcatore)');
+
+-- =============================================================
+-- TEST 10: gara rinviata DOPO il blocco → pronostico resta valido
+-- e viene valutato quando la gara si disputa (A5)
+-- =============================================================
+-- M3: bloccata, poi rinviata, poi disputata in data successiva
+insert into matches (id, season_id, matchday, provider_id, home_team_id, away_team_id,
+                     kickoff_at, status, locked_at)
+values ('cccccccc-0000-0000-0000-000000000003','11111111-1111-1111-1111-111111111111',1,'M3',
+        'aaaaaaaa-0000-0000-0000-000000000001','aaaaaaaa-0000-0000-0000-000000000002',
+        now() - interval '1 day','POSTPONED', now() - interval '2 day');
+
+-- Pronostico fatto prima del rinvio (la policy RLS blocca MODIFICHE, non il salvataggio)
+insert into predictions (id, user_id, match_id, ht_home, ht_away, ht2_home, ht2_away) values
+  ('eeeeeeee-0000-0000-0000-000000000003','dddddddd-0000-0000-0000-000000000001',
+   'cccccccc-0000-0000-0000-000000000003',1,0,0,1);
+insert into prediction_players values
+  ('eeeeeeee-0000-0000-0000-000000000003','bbbbbbbb-0000-0000-0000-000000000002',true),
+  ('eeeeeeee-0000-0000-0000-000000000003','bbbbbbbb-0000-0000-0000-000000000001',false),
+  ('eeeeeeee-0000-0000-0000-000000000003','bbbbbbbb-0000-0000-0000-000000000003',false),
+  ('eeeeeeee-0000-0000-0000-000000000003','bbbbbbbb-0000-0000-0000-000000000004',true);
+
+-- La gara si disputa e viene inserita dal cron
+perform public.ingest_match_result('M3', '{"status":"FINISHED","ht_home":1,"ht_away":0,"ht2_home":0,"ht2_away":1,"ft_home":1,"ft_away":1,"events":[{"event_order":1,"minute":20,"type":"GOAL","player":"P2"},{"event_order":2,"minute":80,"type":"GOAL","player":"P4"}]}');
+
+-- Combo esatto 20. I bonus gol (P2, P4) valgono 0 qui: su una partita di test
+-- senza bonus congelati dal modello, gol_bonus_pts di default e' 0.
+-- In produzione i bonus esistono perche' congelati al blocco (§6).
+select assert_eq((select total from scores
+                  where user_id='dddddddd-0000-0000-0000-000000000001'
+                    and match_id='cccccccc-0000-0000-0000-000000000003'),
+                 20.0::numeric,
+                 'Gara rinviata post-blocco: pronostico valutato alla nuova data');
+
+-- =============================================================
+-- TEST 11: utente normale NON legge admin_audit_log (RLS is_admin)
+-- =============================================================
+do $$
+declare
+  v_visible int;
+begin
+  select set_config('role', 'authenticated', true);
+  select set_config('request.jwt.claims',
+    '{"sub":"dddddddd-0000-0000-0000-000000000001","role":"authenticated"}', true);
+  select count(*) into v_visible from admin_audit_log;
+  select assert_eq(v_visible, 0::int,
+    'Utente normale: zero righe di admin_audit_log (RLS is_admin)');
+end $$;
+
+select set_config('role', 'postgres', true);
+
+-- L'admin invece le vede
+do $$
+declare
+  v_visible int;
+begin
+  select set_config('role', 'authenticated', true);
+  select set_config('request.jwt.claims',
+    '{"sub":"dddddddd-0000-0000-0000-000000000002","role":"authenticated"}', true);
+  select count(*) into v_visible from admin_audit_log;
+  if v_visible < 1 then raise exception 'FAIL: admin non vede audit log'; end if;
+  raise notice 'PASS: admin vede admin_audit_log';
+end $$;
+
+select set_config('role', 'postgres', true);
 
 rollback;
