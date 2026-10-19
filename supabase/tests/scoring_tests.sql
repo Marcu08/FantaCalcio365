@@ -51,7 +51,7 @@ insert into player_match_stats (match_id, player_id, played_minutes, goals, conc
                                 gol_bonus_pts, clean_sheet_bonus_pts, frozen_at) values
   ('cccccccc-0000-0000-0000-000000000001','bbbbbbbb-0000-0000-0000-000000000003',90,2,1,10.0,0,now()),
   ('cccccccc-0000-0000-0000-000000000001','bbbbbbbb-0000-0000-0000-000000000005',90,1,2,8.0,0,now()),
-  ('cccccccc-0000-0000-0000-0000-000000000001','bbbbbbbb-0000-0000-0000-000000000001',90,0,1,0,0,now()),
+  ('cccccccc-0000-0000-0000-000000000001','bbbbbbbb-0000-0000-0000-000000000001',90,0,1,0,0,now()),
   ('cccccccc-0000-0000-0000-000000000001','bbbbbbbb-0000-0000-0000-000000000004',90,0,2,0,0,now());
 
 -- Eventi: 1° gol FW Casa (ord.1), giallo GK Ospite (ord.2), sostituzione DF Casa (ord.3),
