@@ -275,7 +275,7 @@ select pg_temp.assert_eq((select total from scores
 -- M3: bloccata, poi rinviata, poi disputata in data successiva
 insert into matches (id, season_id, matchday, provider_id, home_team_id, away_team_id,
                      kickoff_at, status, locked_at)
-values ('cccccccc-0000-0000-0000-000000000003','11111111-1111-1111-1111-111111111111',1,'M3',
+values ('cccccccc-0000-0000-0000-000000000003','11111111-1111-1111-1111-111111111111',2,'M3',
         'aaaaaaaa-0000-0000-0000-000000000001','aaaaaaaa-0000-0000-0000-000000000002',
         now() - interval '1 day','POSTPONED', now() - interval '2 day');
 
