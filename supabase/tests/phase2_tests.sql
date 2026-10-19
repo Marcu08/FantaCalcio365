@@ -546,4 +546,81 @@ end $$;
 
 select set_config('role', 'postgres', true);
 
+-- =============================================================
+-- TEST 14: conceded_goals da score_match + clean sheet tolta dall'override
+-- =============================================================
+insert into matches (id, season_id, matchday, provider_id, home_team_id, away_team_id,
+                     kickoff_at, status, locked_at)
+values ('cccccccc-0000-0000-0000-000000000007','11111111-1111-1111-1111-111111111111',7,'M9',
+        'aaaaaaaa-0000-0000-0000-000000000001','aaaaaaaa-0000-0000-0000-000000000002',
+        now() - interval '2 hours','SCHEDULED', now() - interval '3 hours');
+
+-- GK Casa: bonus porta inviolata 10 congelato, prima ancora di giocare
+insert into player_match_stats (match_id, player_id, played_minutes, goals, conceded_goals,
+                                gol_bonus_pts, clean_sheet_bonus_pts, frozen_at) values
+  ('cccccccc-0000-0000-0000-000000000007','bbbbbbbb-0000-0000-0000-000000000001',90,0,0,0,10.0,now()),
+  ('cccccccc-0000-0000-0000-000000000007','bbbbbbbb-0000-0000-0000-000000000004',0,0,0,9.0,0,now());
+
+insert into predictions (id, user_id, match_id, ht_home, ht_away, ht2_home, ht2_away) values
+  ('eeeeeeee-0000-0000-0000-000000000020','dddddddd-0000-0000-0000-000000000001',
+   'cccccccc-0000-0000-0000-000000000007',0,0,0,0);
+insert into prediction_players values
+  ('eeeeeeee-0000-0000-0000-000000000020','bbbbbbbb-0000-0000-0000-000000000001',false),
+  ('eeeeeeee-0000-0000-0000-000000000020','bbbbbbbb-0000-0000-0000-000000000002',false),
+  ('eeeeeeee-0000-0000-0000-000000000020','bbbbbbbb-0000-0000-0000-000000000003',false),
+  ('eeeeeeee-0000-0000-0000-000000000020','bbbbbbbb-0000-0000-0000-000000000004',true);
+
+-- Primo giro: 0-0 → combo 20 + porta inviolata P1 (10) = 30
+select public.ingest_match_result('M9', '{"status":"FINISHED","ht_home":0,"ht_away":0,"ht2_home":0,"ht2_away":0,"ft_home":0,"ft_away":0,"events":[]}');
+select pg_temp.assert_eq((select total from scores where match_id='cccccccc-0000-0000-0000-000000000007'),
+                 30.0::numeric, '0-0: combo 20 + porta inviolata 10 = 30');
+
+-- Override: la casa SUBISCE un gol → P4 (ospite) segna l'unico gol
+select set_config('role', 'postgres', true);
+select set_config('request.jwt.claims',
+  '{"sub":"dddddddd-0000-0000-0000-000000000002","role":"authenticated"}', true);
+select public.admin_override_match(
+  'M9',
+  '{"status":"CONFIRMED","ht_home":0,"ht_away":0,"ht2_home":0,"ht2_away":1,"ft_home":0,"ft_away":1}',
+  '[{"event_order":1,"minute":60,"type":"GOAL","player":"P4"}]',
+  'Correzione: gol annullato dall''arbitro, poi assegnato a tavolino');
+reset role;
+
+select pg_temp.assert_eq((select conceded_goals from player_match_stats
+                  where match_id='cccccccc-0000-0000-0000-000000000007'
+                    and player_id='bbbbbbbb-0000-0000-0000-000000000001'),
+                 1::int, 'Override: conceded_goals del GK ricalcolato = 1');
+select pg_temp.assert_eq((select total from scores where match_id='cccccccc-0000-0000-0000-000000000007'),
+                 29.0::numeric,
+                 'Override: porta inviolata PERSA (20->0+0+bonus P4 9 = 29)');
+
+-- =============================================================
+-- TEST 15: evento GOAL = prova di presenza (played_minutes), bonus valido
+-- =============================================================
+select pg_temp.assert_eq((select played_minutes from player_match_stats
+                  where match_id='cccccccc-0000-0000-0000-000000000007'
+                    and player_id='bbbbbbbb-0000-0000-0000-000000000004'),
+                 90::int,
+                 'Marcatore con evento GOAL: presenza registrata (played_minutes=90)');
+select pg_temp.assert_eq((select goals from player_match_stats
+                  where match_id='cccccccc-0000-0000-0000-000000000007'
+                    and player_id='bbbbbbbb-0000-0000-0000-000000000004'),
+                 1::int, 'Marcatore con 1 rete: goals=1 (bonus 9 pagato nel totale)');
+
+-- =============================================================
+-- TEST 16: dopo il RELEASE il punteggio viene ricalcolato dai dati del provider
+-- =============================================================
+select set_config('role', 'postgres', true);
+select set_config('request.jwt.claims',
+  '{"sub":"dddddddd-0000-0000-0000-000000000002","role":"authenticated"}', true);
+select public.admin_release_override('M9', 'Rilascio: dati provider risultati affidabili');
+reset role;
+
+-- Il cron riprende la partita: nuovo risultato dal provider (0-2)
+select public.ingest_match_result('M9', '{"status":"CONFIRMED","ht_home":0,"ht_away":1,"ht2_home":0,"ht2_away":1,"ft_home":0,"ft_away":2,"events":[{"event_order":1,"minute":30,"type":"GOAL","player":"P4"},{"event_order":2,"minute":75,"type":"GOAL","player":"P4"}]}');
+
+select pg_temp.assert_eq((select total from scores where match_id='cccccccc-0000-0000-0000-000000000007'),
+                 18.0::numeric,
+                 'Post-release: ricalcolo dai dati provider (doppio P4 = 9x2 = 18)');
+
 rollback;

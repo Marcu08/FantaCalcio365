@@ -116,6 +116,7 @@ supabase db query --linked "select status, count(*) from matches group by status
 ```powershell
 supabase functions deploy provider-proxy
 supabase functions deploy admin-override
+supabase functions deploy admin-release-override
 supabase functions deploy cron-tasks
 ```
 
@@ -131,6 +132,44 @@ supabase db dump --linked --data --file "backup_data_$(Get-Date -Format yyyyMMdd
 ```
 In caso di rollback: `psql "<DB_URL>" -f backup_<ts>.sql` dopo aver interrotto il cron
 (Dashboard → Database → Cron → disable `fantacalcio365-cron-tasks`).
+
+### Admin: correzione manuale di una partita
+
+`admin-override` sovrascrive risultato, eventi e statistiche di una partita, marca
+`manual_override = true` e ricalcola i punteggi. **Mentre l'override è attivo il cron
+NON tocca la partita.** Per restituirla al provider usa `admin-release-override`:
+dopo il rilascio, il cron al ciclo successivo risincronizza la partita **ricalcolando
+i punteggi dai dati del provider**.
+
+Chiamata (solo admin; JWT nel header):
+
+```powershell
+# Correzione manuale
+Invoke-WebRequest "https://<PROJECT>.supabase.co/functions/v1/admin-override" `
+  -Method POST `
+  -Headers @{ Authorization = "Bearer <JWT_ADMIN>"; "Content-Type" = "application/json" } `
+  -Body '{
+    "provider_id": "1234567",
+    "reason": "Correzione ufficiale: gol al 62 cambiato in autogol",
+    "result": { "status": "CONFIRMED", "ht_home": 1, "ht_away": 0,
+                "ht2_home": 1, "ht2_away": 1, "ft_home": 2, "ft_away": 1 },
+    "events": [
+      { "event_order": 1, "minute": 20, "type": "GOAL", "player": "1089" },
+      { "event_order": 2, "minute": 62, "type": "GOAL", "player": "2341", "own_goal": true },
+      { "event_order": 3, "minute": 78, "type": "GOAL", "player": "3102" }
+    ]
+  }'
+
+# Rilascio override: il cron riprende la sincronizzazione e ricalcola
+Invoke-WebRequest "https://<PROJECT>.supabase.co/functions/v1/admin-release-override" `
+  -Method POST `
+  -Headers @{ Authorization = "Bearer <JWT_ADMIN>"; "Content-Type" = "application/json" } `
+  -Body '{ "provider_id": "1234567", "reason": "Dati provider confermati corretti" }'
+```
+
+Vincoli del payload: `ft = ht + ht2` per entrambe le squadre; il numero di eventi
+`GOAL` (autogoli inclusi) deve coincidere con i gol totali; ogni `player` e
+`related_player` deve esistere; `event_order` univoco; motivo obbligatorio (5-500 caratteri).
 
 ### Edge Functions
 ```powershell

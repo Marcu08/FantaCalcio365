@@ -164,6 +164,18 @@ begin
       true
     );
 
+    -- Presenza in campo: qualsiasi evento di presenza (GOAL valido, giallo,
+    -- SUB_OUT/SUB_IN) e' prova di campo → evidenza played_minutes.
+    -- APPROSSIMAZIONE DOCUMENTATA: 90 minuti fintanto che non esiste la sync
+    -- formazioni; il bonus marcatore resta legato a goals > 0.
+    if ev->>'player' is not null and ev->>'type' in ('GOAL','YELLOW','SUB_OUT','SUB_IN')
+       and coalesce((ev->>'own_goal')::boolean, false) = false then
+      insert into player_match_stats (match_id, player_id, played_minutes)
+      values (p_match_id, (select id from players where provider_id = ev->>'player'), 90)
+      on conflict (match_id, player_id)
+      do update set played_minutes = greatest(player_match_stats.played_minutes, 90);
+    end if;
+
     -- GOAL: l'autogol NON assegna mai goal allo stat del giocatore
     -- (il bonus marcatore deriva da goals > 0, §5)
     if ev->>'type' = 'GOAL' and ev->>'player' is not null
@@ -199,6 +211,15 @@ begin
   if m.status not in ('FINISHED','CONFIRMED') then
     raise exception 'Partita % non terminata', p_match_id;
   end if;
+
+  -- conceded_goals calcolato DAL RISULTATO CORRENTE, per entrambi i percorsi
+  -- (ingest e override): la casa subisce ft_away, l'ospite subisce ft_home.
+  -- Idempotente: il ricalcolo riparte sempre dal risultato ufficiale.
+  update player_match_stats ps
+  set conceded_goals = case when pl.team_id = m.home_team_id
+                            then m.ft_away_goals else m.ft_home_goals end
+  from players pl
+  where pl.id = ps.player_id and ps.match_id = m.id;
 
   select coalesce(sum(total), 0), count(*) into v_sum_old, v_rows_old
   from scores where match_id = p_match_id;
