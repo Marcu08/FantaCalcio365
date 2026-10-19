@@ -101,7 +101,7 @@ Deno.serve(async (req) => {
       const ft = f.score?.fulltime;
       const status = round >= FUTURE_FROM_MATCHDAY
         ? "SCHEDULED"
-        : (STATUS_MAP[f.fixture.status?.short] ?? "SCHEDULED");
+        : (bothPlayed ? "CONFIRMED" : (STATUS_MAP[f.fixture.status?.short] ?? "SCHEDULED"));
       const homeId = teamByProvider.get(String(f.teams.home.id));
       const awayId = teamByProvider.get(String(f.teams.away.id));
       if (!homeId || !awayId) return null;
