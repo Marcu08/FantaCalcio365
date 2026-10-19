@@ -80,7 +80,7 @@ jobs:
       - name: Inserisce dati di esempio realistici
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f supabase/tests/populated_seed.sql
 
-      - name: Conteggi pre-0008
+      - name: Conteggi e punteggi PRIMA della 0008
         run: |
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -Atc \
             "select 'matches='||count(*) from matches;
@@ -93,7 +93,7 @@ jobs:
       - name: Applica la 0008 su database popolato
         run: mv /tmp/0008.sql supabase/migrations/0008_cache_and_audit.sql && psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f supabase/migrations/0008_cache_and_audit.sql
 
-      - name: Conteggi post-0008 e confronto
+      - name: Conteggi e punteggi DOPO la 0008 — devono essere IDENTICI
         run: |
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -Atc \
             "select 'matches='||count(*) from matches;
@@ -102,8 +102,12 @@ jobs:
              select 'scores='||count(*) from scores;
              select 'score40='||total from scores limit 1;" > /tmp/counts_after.txt
           cat /tmp/counts_after.txt
-          diff /tmp/counts_before.txt /tmp/counts_after.txt
-          echo "OK: nessun dato perso, punteggi invariati dopo la 0008"
+          # ASSERTIONE: nessuna differenza ammessa nei conteggi e nei punteggi
+          if ! diff -u /tmp/counts_before.txt /tmp/counts_after.txt; then
+            echo "FAIL: la 0008 ha alterato dati esistenti (conteggi/punteggi non identici)"
+            exit 1
+          fi
+          echo "VERIFICATO: conteggi e punteggi IDENTICI prima e dopo la 0008"
 
   deno-functions:
     name: Test Edge Functions (deno test)

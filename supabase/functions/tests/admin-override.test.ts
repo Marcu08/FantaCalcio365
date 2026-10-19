@@ -96,16 +96,16 @@ Deno.test("413 con body oltre 64KB", async () => {
   resetMockFactory();
 });
 
-Deno.test("200 e RPC chiamata con p_actor se admin", async () => {
+Deno.test("200 e RPC chiamata senza p_actor (attore = auth.uid() lato SQL)", async () => {
   const adminClient = makeAdminClient();
   setMockFactory(() => adminClient.client);
   const mod = await importIndex("../admin-override/index.ts");
   const { status } = await callHandlerDirect(mod.handler, VALID_BODY);
   assertEquals(status, 200);
   const captured = adminClient.rpcCalls.find((r: any) => r.name === "admin_override_match");
-  assertEquals(captured?.args?.p_actor, "admin-uuid");
   assertEquals(captured?.args?.p_provider_id, "M1");
   assertEquals(captured?.args?.p_result.ft_home, 2);
+  assertEquals(captured?.args?.p_actor, undefined, "p_actor non deve essere passato");
   resetMockFactory();
 });
 

@@ -77,7 +77,8 @@ export async function handler(req: Request): Promise<Response> {
       p_result: input.result,
       p_events: input.events,
       p_reason: input.reason,
-      p_actor: user.id,
+      // Niente p_actor: dentro admin_override_match l'attore e' SEMPRE
+      // auth.uid(), cioe' l'utente identificato da QUESTO JWT
     });
     if (rpcErr) {
       return Response.json({ error: rpcErr.message }, { status: 400 });

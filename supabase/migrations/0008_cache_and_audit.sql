@@ -4,6 +4,18 @@
 -- Applicabile su database gia' popolato: solo ADD COLUMN / CREATE.
 -- =============================================================
 
+-- =============================================================
+-- 0. is_admin() v2: security definer, search_path fissato con pg_temp,
+--    legge SOLO auth.uid() (nessun input esterno).
+--    (sostituisce la versione di 0002 che non includeva pg_temp)
+-- =============================================================
+create or replace function public.is_admin()
+returns boolean
+language sql stable security definer
+set search_path = public, pg_temp as $$
+  select coalesce((select is_admin from profiles where id = auth.uid()), false);
+$$;
+
 -- 1. Cache grezza delle risposte provider ----------------------
 create table event_cache (
   provider_match_id text primary key,
@@ -208,8 +220,7 @@ create or replace function public.admin_override_match(
   p_provider_id text,
   p_result jsonb,
   p_events jsonb,
-  p_reason text,
-  p_actor uuid default null
+  p_reason text
 ) returns void
 language plpgsql security definer
 set search_path = public, pg_temp as $$
@@ -220,8 +231,12 @@ declare
   ev jsonb;
   v_player uuid;
 begin
+  -- L'attore e' SEMPRE auth.uid() (il JWT con cui la RPC viene chiamata)
   if not public.is_admin() then
     raise exception 'Solo gli amministratori possono correggere una partita';
+  end if;
+  if auth.uid() is null then
+    raise exception 'Chiamata senza JWT valido: attore non identificabile';
   end if;
   if p_reason is null or length(trim(p_reason)) < 5 then
     raise exception 'Motivazione obbligatoria (min 5 caratteri)';
@@ -270,7 +285,7 @@ begin
     data_confirmed_at = case when v_status = 'CONFIRMED' then now() else data_confirmed_at end,
     -- protegge la correzione dal cron (§ cron-tasks salta manual_override = true)
     manual_override = true,
-    override_by = coalesce(p_actor, auth.uid()),
+    override_by = auth.uid(),
     override_at = now()
   where id = v_match_id;
 
@@ -307,7 +322,7 @@ begin
 
   insert into admin_audit_log (actor_id, action, entity, entity_id, old_value, new_value, payload)
   values (
-    coalesce(p_actor, auth.uid()), 'ADMIN_OVERRIDE', 'match', v_match_id::text,
+    auth.uid(), 'ADMIN_OVERRIDE', 'match', v_match_id::text,
     v_old,
     jsonb_build_object(
       'status', v_status,
@@ -320,12 +335,12 @@ begin
   );
 end $$;
 
-revoke all on function public.admin_override_match(text, jsonb, jsonb, text, uuid)
+revoke all on function public.admin_override_match(text, jsonb, jsonb, text)
   from public, anon;
 -- Necessario EXECUTE a authenticated: l'Edge Function chiama la RPC con il JWT
 -- dell'admin (ruolo authenticated). La protezione e' la guard is_admin() interna,
 -- non il REVOKE (che bloccherebbe anche gli admin legitimi).
-grant execute on function public.admin_override_match(text, jsonb, jsonb, text, uuid) to authenticated;
+grant execute on function public.admin_override_match(text, jsonb, jsonb, text) to authenticated;
 
 -- apply_official_correction v2: idem versione 0003 ma con temp table
 -- protetta da collisione (la funzione puo' girare piu' volte per transazione)

@@ -106,8 +106,7 @@ select public.admin_override_match(
     {"event_order":2,"minute":40,"type":"GOAL","player":"P2"},
     {"event_order":3,"minute":60,"type":"GOAL","player":"P4"},
     {"event_order":4,"minute":80,"type":"YELLOW","player":"P3"}]',
-  'Correzione ufficiale lega',
-  'dddddddd-0000-0000-0000-000000000002'
+  'Correzione ufficiale lega'
 );
 reset role;
 
@@ -183,14 +182,18 @@ select pg_temp.assert_eq(
 -- =============================================================
 do $$
 begin
+  -- contesto admin: senza claims corretti is_admin() bloccherebbe prima
+  -- delle validazioni (falso PASS)
+  perform set_config('role', 'postgres', true);
+  perform set_config('request.jwt.claims',
+    '{"sub":"dddddddd-0000-0000-0000-000000000002","role":"authenticated"}', true);
   begin
     perform public.admin_override_match(
       'M1',
       '{"status":"CONFIRMED","ht_home":1,"ht_away":0,"ht2_home":0,"ht2_away":0,"ft_home":1,"ft_away":0}',
       '[{"event_order":1,"minute":10,"type":"GOAL","player":"P2"},
         {"event_order":1,"minute":20,"type":"GOAL","player":"P2"}]',
-      'Test ordini duplicati',
-      'dddddddd-0000-0000-0000-000000000002');
+      'Test ordini duplicati');
     raise exception 'TEST FALLITO: event_order duplicati accettati';
   exception when raise_exception then
     raise notice 'PASS: event_order duplicati rifiutati';
@@ -202,13 +205,15 @@ end $$;
 -- =============================================================
 do $$
 begin
+  perform set_config('role', 'postgres', true);
+  perform set_config('request.jwt.claims',
+    '{"sub":"dddddddd-0000-0000-0000-000000000002","role":"authenticated"}', true);
   begin
     perform public.admin_override_match(
       'M1',
       '{"status":"CONFIRMED","ht_home":1,"ht_away":0,"ht2_home":0,"ht2_away":0,"ft_home":1,"ft_away":0}',
       '[{"event_order":1,"minute":10,"type":"GOAL","player":"INESISTENTE"}]',
-      'Test giocatore fantasma',
-      'dddddddd-0000-0000-0000-000000000002');
+      'Test giocatore fantasma');
     raise exception 'TEST FALLITO: giocatore inesistente accettato';
   exception when raise_exception then
     raise notice 'PASS: giocatore inesistente rifiutato';

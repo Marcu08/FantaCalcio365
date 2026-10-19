@@ -166,9 +166,44 @@ end $$;
 select set_config('role', 'postgres', true);
 
 -- =============================================================
--- TEST 4: spareggi classifica — risultato, marcatori, orario,
---         con caso di parita' totale
+-- TEST 5: is_admin NON modificabile dal client
+--         (update della propria riga e insert con is_admin = true)
 -- =============================================================
+do $$
+declare
+  v_bad int;
+begin
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    '{"sub":"dddddddd-0000-0000-0000-000000000001","role":"authenticated"}', true);
+
+  -- 5a: UPDATE della propria riga provando ad auto-promuoversi admin
+  begin
+    update profiles set is_admin = true where id = 'dddddddd-0000-0000-0000-000000000001';
+  exception when insufficient_privilege then
+    null; -- policy with-check rifiuta la modifica
+  end;
+  select count(*) into v_bad from profiles
+  where id = 'dddddddd-0000-0000-0000-000000000001' and is_admin = true;
+  perform pg_temp.assert_eq(v_bad, 0::int, 'self-promozione a admin BLOCCATA su update');
+
+  -- 5b: INSERT di un profilo con is_admin = true
+  -- (nessuna insert policy su profiles: RLS la nega; un eventuale id
+  --  inesistente violerebbe anche la FK — entrambi gli esiti sono "negato")
+  begin
+    insert into profiles (id, username, is_admin)
+    values ('dddddddd-0000-0000-0000-000000000009', 'hacker', true);
+    raise exception 'FAIL: insert profilo admin accettata';
+  exception
+    when insufficient_privilege or foreign_key_violation or raise_exception then
+      raise notice 'PASS: insert profilo con is_admin=true RIFIUTATA';
+  end;
+end $$;
+
+select set_config('role', 'postgres', true);
+
+-- =============================================================
+-- TEST 6: spareggi classifica — risultato, marcatori, orario,
 insert into scores (user_id, match_id, season_id, matchday, total, exact_ht, exact_ht2, exact_scorers, first_submitted_at) values
   -- A: 100 punti, 1 esatto, 2 marcatori
   ('dddddddd-0000-0000-0000-000000000001','cccccccc-0000-0000-0000-000000000001',
