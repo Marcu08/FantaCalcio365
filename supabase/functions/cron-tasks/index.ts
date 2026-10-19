@@ -11,7 +11,7 @@
 //  5. Provider offline: fetch_status='provider_down', retry al ciclo successivo
 // Deploy: supabase functions deploy cron-tasks
 // =============================================================
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
 const TTL_LIVE = parseInt(Deno.env.get("CACHE_TTL_LIVE_S") ?? "30");
 const TTL_UNCONFIRMED = parseInt(Deno.env.get("CACHE_TTL_UNCONFIRMED_S") ?? "900");

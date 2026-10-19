@@ -8,7 +8,7 @@
 //    e actor_id dell'audit e' l'admin stesso.
 // Deploy: supabase functions deploy admin-override
 // =============================================================
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { z } from "https://esm.sh/zod@3.23.8";
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -34,7 +34,14 @@ const OverrideSchema = z.object({
     ht2_away: z.number().int().min(0).max(20),
     ft_home: z.number().int().min(0).max(20),
     ft_away: z.number().int().min(0).max(20),
-  }),
+  })
+    // Coerenza: ft = ht + ht2 per entrambe le squadre
+    .refine((r) => r.ft_home === r.ht_home + r.ht2_home, {
+      message: "ft_home <> ht_home + ht2_home",
+    })
+    .refine((r) => r.ft_away === r.ht_away + r.ht2_away, {
+      message: "ft_away <> ht_away + ht2_away",
+    }),
   events: z.array(EventSchema).max(100),
 });
 
@@ -47,7 +54,15 @@ export async function handler(req: Request): Promise<Response> {
       return Response.json({ error: "Body troppo grande (max 64KB)" }, { status: 413 });
     }
 
-    const parsed = OverrideSchema.safeParse(JSON.parse(raw));
+    // JSON non valido: 400 generico, mai l'errore grezzo
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(raw);
+    } catch {
+      return Response.json({ error: "Payload non valido" }, { status: 400 });
+    }
+
+    const parsed = OverrideSchema.safeParse(parsedJson);
     if (!parsed.success) {
       return Response.json(
         { error: "Payload non valido", issues: parsed.error.issues },
@@ -56,14 +71,18 @@ export async function handler(req: Request): Promise<Response> {
     }
     const input = parsed.data;
 
+    // Token estratto dall'header: 401 se assente
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) return new Response("Unauthorized", { status: 401 });
+
     // JWT dell'admin: necessario perche' auth.uid() sia valorizzato
     // dentro admin_override_match (RPC eseguita con le sue credenziali)
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } } },
     );
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user } } = await supabase.auth.getUser(token);
     if (!user) return new Response("Unauthorized", { status: 401 });
 
     const { data: profile, error: profErr } = await supabase

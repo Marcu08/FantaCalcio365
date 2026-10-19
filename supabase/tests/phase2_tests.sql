@@ -101,19 +101,21 @@ select set_config('request.jwt.claims',
   '{"sub":"dddddddd-0000-0000-0000-000000000002","role":"authenticated"}', true);
 select public.admin_override_match(
   'M1',
+  -- 1T 2-0, 2T 1-1, ft 3-1; 4 eventi GOAL = 4 gol (coerenza)
   '{"status":"CONFIRMED","ht_home":2,"ht_away":0,"ht2_home":1,"ht2_away":1,"ft_home":3,"ft_away":1}',
   '[{"event_order":1,"minute":10,"type":"GOAL","player":"P2"},
     {"event_order":2,"minute":40,"type":"GOAL","player":"P2"},
-    {"event_order":3,"minute":60,"type":"GOAL","player":"P4"},
-    {"event_order":4,"minute":80,"type":"YELLOW","player":"P3"}]',
+    {"event_order":3,"minute":60,"type":"GOAL","player":"P2"},
+    {"event_order":4,"minute":70,"type":"GOAL","player":"P4"},
+    {"event_order":5,"minute":80,"type":"YELLOW","player":"P3"}]',
   'Correzione ufficiale lega'
 );
 reset role;
 
 -- Nuovi punteggi: 1T 2-0 errato (0), 2T 1-1 errato (0),
--- P2 marcatore 2 reti x 10 = 20, P4 marcatore 1 rete x 9 = 9 → 29
+-- P2 marcatore 3 reti x 10 = 30, P4 marcatore 1 rete x 9 = 9 → 39
 select pg_temp.assert_eq((select total from scores where user_id='dddddddd-0000-0000-0000-000000000001'),
-                 29.0::numeric, 'Override ricalcolato = 29');
+                 39.0::numeric, 'Override ricalcolato = 39');
 
 select pg_temp.assert_eq((select manual_override from matches where id='cccccccc-0000-0000-0000-000000000001'),
                  true, 'manual_override impostato');
@@ -222,8 +224,7 @@ end $$;
 
 -- =============================================================
 -- TEST 8: due gialli STESSO minuto → decide event_order del provider
--- =============================================================
--- Nuova partita: due gialli entrambi al minuto 10, ordini 1 e 2.
+-- =============================================================-- Nuova partita: due gialli entrambi al minuto 10, ordini 1 e 2.
 insert into matches (id, season_id, matchday, provider_id, home_team_id, away_team_id,
                      kickoff_at, status, locked_at,
                      ht_home_goals, ht_away_goals, ht2_home_goals, ht2_away_goals,
@@ -334,6 +335,215 @@ begin
   select count(*) into v_visible from admin_audit_log;
   if v_visible < 1 then raise exception 'FAIL: admin non vede audit log'; end if;
   raise notice 'PASS: admin vede admin_audit_log';
+end $$;
+
+select set_config('role', 'postgres', true);
+
+-- =============================================================
+-- TEST 8b: privilegi — lista ESATTA delle funzioni eseguibili
+--          da authenticated (audit pg_proc)
+-- =============================================================
+create temp table t_exec as
+select distinct p.proname
+from pg_proc p
+join aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a on true
+join pg_roles r on r.oid = a.grantee
+where p.pronamespace = 'public'::regnamespace
+  and a.privilege_type = 'EXECUTE'
+  and r.rolname in ('anon','authenticated');
+
+select pg_temp.assert_eq(
+  (select string_agg(proname, ',' order by proname) from t_exec),
+  'admin_override_match,admin_release_override,is_admin,is_group_member,is_group_owner',
+  'Funzioni eseguibili da anon/authenticated = SOLO le 5 attese');
+
+-- E le funzioni interne NON sono eseguibili da authenticated
+select pg_temp.assert_eq(
+  (select count(*)::int from t_exec where proname in
+   ('score_match','ingest_match_result','apply_official_correction',
+    'cache_match_events','cache_is_fresh','lock_matchday','lock_due_matchdays',
+    'freeze_matchday_bonuses','first_sub_out','first_yellow')),
+  0::int, 'Funzioni interne NON eseguibili dai ruoli client');
+
+-- Audit pg_proc (richiesto per revisione umana): stampato nel log CI
+select 'AUDIT pg_proc: ' || proname || ' -> proconfig=' || coalesce(proconfig::text,'null')
+from pg_proc where pronamespace = 'public'::regnamespace
+  and proname in ('admin_override_match','admin_release_override','score_match',
+                  'ingest_match_result','is_admin','cache_is_fresh');
+
+-- =============================================================
+-- TEST 9: coerenza override — ft <> ht+ht2 RIFIUTATO
+-- =============================================================
+do $$
+begin
+  begin
+    perform public.admin_override_match(
+      'M1',
+      '{"status":"CONFIRMED","ht_home":2,"ht_away":0,"ht2_home":1,"ht2_away":1,"ft_home":4,"ft_away":1}',
+      '[{"event_order":1,"minute":10,"type":"GOAL","player":"P2"},
+        {"event_order":2,"minute":40,"type":"GOAL","player":"P2"},
+        {"event_order":3,"minute":60,"type":"GOAL","player":"P2"},
+        {"event_order":4,"minute":70,"type":"GOAL","player":"P4"},
+        {"event_order":5,"minute":80,"type":"GOAL","player":"P2"}]',
+      'Test coerenza ft vs ht+ht2');
+    raise exception 'TEST FALLITO: ft incoerente accettato';
+  exception when raise_exception then
+    raise notice 'PASS: override con ft <> ht+ht2 RIFIUTATO';
+  end;
+end $$;
+
+-- Numero eventi GOAL incoerente col risultato → rifiutato
+do $$
+begin
+  begin
+    perform public.admin_override_match(
+      'M1',
+      '{"status":"CONFIRMED","ht_home":2,"ht_away":0,"ht2_home":1,"ht2_away":1,"ft_home":3,"ft_away":1}',
+      '[{"event_order":1,"minute":10,"type":"GOAL","player":"P2"}]',
+      'Test conteggio gol incoerente');
+    raise exception 'TEST FALLITO: conteggio gol incoerente accettato';
+  exception when raise_exception then
+    raise notice 'PASS: numero eventi GOAL incoerente RIFIUTATO';
+  end;
+end $$;
+
+-- =============================================================
+-- TEST 10: autogol — NON assegna goal allo stat del giocatore
+-- =============================================================
+insert into matches (id, season_id, matchday, provider_id, home_team_id, away_team_id,
+                     kickoff_at, status, locked_at,
+                     ht_home_goals, ht_away_goals, ht2_home_goals, ht2_away_goals,
+                     ft_home_goals, ft_away_goals)
+values ('cccccccc-0000-0000-0000-000000000004','11111111-1111-1111-1111-111111111111',4,'M6',
+        'aaaaaaaa-0000-0000-0000-000000000001','aaaaaaaa-0000-0000-0000-000000000002',
+        now() - interval '2 hours','FINISHED', now() - interval '3 hours',
+        1, 0,   0, 0,   1, 0);
+
+-- gol di P3 (GK Ospite) AUTOGOL: conta per la casa, ma P3 non prende goals
+select public.ingest_match_result('M6', '{"status":"FINISHED","ht_home":1,"ht_away":0,"ht2_home":0,"ht2_away":0,"ft_home":1,"ft_away":0,"events":[{"event_order":1,"minute":30,"type":"GOAL","player":"P3","own_goal":true}]}');
+
+select pg_temp.assert_eq((select coalesce(max(goals),0) from player_match_stats
+                  where match_id='cccccccc-0000-0000-0000-000000000004'
+                    and player_id='bbbbbbbb-0000-0000-0000-000000000003'),
+                 0::int, 'Autogol: goals=0 nello stat del giocatore (no bonus)');
+
+-- =============================================================
+-- TEST 11: ingest vs override — stessi eventi = stesse stats/punteggi
+-- =============================================================
+insert into matches (id, season_id, matchday, provider_id, home_team_id, away_team_id,
+                     kickoff_at, status, locked_at,
+                     ht_home_goals, ht_away_goals, ht2_home_goals, ht2_away_goals,
+                     ft_home_goals, ft_away_goals)
+values
+  ('cccccccc-0000-0000-0000-000000000005','11111111-1111-1111-1111-111111111111',5,'M7',
+   'aaaaaaaa-0000-0000-0000-000000000001','aaaaaaaa-0000-0000-0000-000000000002',
+   now() - interval '2 hours','SCHEDULED', now() - interval '3 hours'),
+  ('cccccccc-0000-0000-0000-000000000006','11111111-1111-1111-1111-111111111111',6,'M8',
+   'aaaaaaaa-0000-0000-0000-000000000002','aaaaaaaa-0000-0000-0000-000000000001',
+   now() - interval '2 hours','SCHEDULED', now() - interval '3 hours');
+
+-- Pronostici IDENTICI su entrambe le partite
+insert into predictions (id, user_id, match_id, ht_home, ht_away, ht2_home, ht2_away) values
+  ('eeeeeeee-0000-0000-0000-000000000010','dddddddd-0000-0000-0000-000000000001',
+   'cccccccc-0000-0000-0000-000000000005',1,0,0,1),
+  ('eeeeeeee-0000-0000-0000-000000000011','dddddddd-0000-0000-0000-000000000001',
+   'cccccccc-0000-0000-0000-000000000006',1,0,0,1);
+insert into prediction_players values
+  ('eeeeeeee-0000-0000-0000-000000000010','bbbbbbbb-0000-0000-0000-000000000002',true),
+  ('eeeeeeee-0000-0000-0000-000000000010','bbbbbbbb-0000-0000-0000-000000000001',false),
+  ('eeeeeeee-0000-0000-0000-000000000010','bbbbbbbb-0000-0000-0000-000000000003',false),
+  ('eeeeeeee-0000-0000-0000-000000000010','bbbbbbbb-0000-0000-0000-000000000004',true),
+  ('eeeeeeee-0000-0000-0000-000000000011','bbbbbbbb-0000-0000-0000-000000000002',true),
+  ('eeeeeeee-0000-0000-0000-000000000011','bbbbbbbb-0000-0000-0000-000000000001',false),
+  ('eeeeeeee-0000-0000-0000-000000000011','bbbbbbbb-0000-0000-0000-000000000003',false),
+  ('eeeeeeee-0000-0000-0000-000000000011','bbbbbbbb-0000-0000-0000-000000000004',true);
+
+-- Bonus identici congelati su entrambe le partite
+insert into player_match_stats (match_id, player_id, gol_bonus_pts, frozen_at) values
+  ('cccccccc-0000-0000-0000-000000000005','bbbbbbbb-0000-0000-0000-000000000002',10.0,now()),
+  ('cccccccc-0000-0000-0000-000000000005','bbbbbbbb-0000-0000-0000-000000000004',9.0,now()),
+  ('cccccccc-0000-0000-0000-000000000006','bbbbbbbb-0000-0000-0000-000000000002',10.0,now()),
+  ('cccccccc-0000-0000-0000-000000000006','bbbbbbbb-0000-0000-0000-000000000004',9.0,now());
+
+-- Stessi risultati/eventi: M7 via INGEST, M8 via OVERRIDE
+select public.ingest_match_result('M7', '{"status":"CONFIRMED","ht_home":1,"ht_away":0,"ht2_home":1,"ht2_away":1,"ft_home":2,"ft_away":1,"events":[{"event_order":1,"minute":10,"type":"GOAL","player":"P2"},{"event_order":2,"minute":60,"type":"GOAL","player":"P4"},{"event_order":3,"minute":70,"type":"GOAL","player":"P2"},{"event_order":4,"minute":90,"type":"YELLOW","player":"P1"}]}');
+
+select set_config('role', 'postgres', true);
+select set_config('request.jwt.claims',
+  '{"sub":"dddddddd-0000-0000-0000-000000000002","role":"authenticated"}', true);
+select public.admin_override_match(
+  'M8',
+  '{"status":"CONFIRMED","ht_home":1,"ht_away":0,"ht2_home":1,"ht2_away":1,"ft_home":2,"ft_away":1}',
+  '[{"event_order":1,"minute":10,"type":"GOAL","player":"P2"},{"event_order":2,"minute":60,"type":"GOAL","player":"P4"},{"event_order":3,"minute":70,"type":"GOAL","player":"P2"},{"event_order":4,"minute":90,"type":"YELLOW","player":"P1"}]',
+  'Test equivalenza ingest vs override');
+reset role;
+
+-- Eventi: stessi campi, stesso ordine
+select pg_temp.assert_eq(
+  (select count(*)::int from match_events where match_id='cccccccc-0000-0000-0000-000000000005'),
+  (select count(*)::int from match_events where match_id='cccccccc-0000-0000-0000-000000000006'),
+  'Equivalenza: stesso numero eventi');
+
+-- Stats: goals/yellow identici per ciascun giocatore
+create temp table t_stats_cmp as
+select a.player_id, a.goals as g_ing, a.yellow_cards as y_ing,
+       b.goals as g_ovr, b.yellow_cards as y_ovr
+from player_match_stats a
+join player_match_stats b on b.player_id = a.player_id
+where a.match_id = 'cccccccc-0000-0000-0000-000000000005'
+  and b.match_id = 'cccccccc-0000-0000-0000-000000000006';
+
+select pg_temp.assert_eq((select count(*)::int from t_stats_cmp
+                          where g_ing <> g_ovr or y_ing <> y_ovr),
+                 0::int, 'Equivalenza: stesse stats (gol/gialli) da ingest e override');
+
+-- Punteggi identici
+select pg_temp.assert_eq(
+  (select total from scores where user_id='dddddddd-0000-0000-0000-000000000001'
+    and match_id='cccccccc-0000-0000-0000-000000000005'),
+  (select total from scores where user_id='dddddddd-0000-0000-0000-000000000001'
+    and match_id='cccccccc-0000-0000-0000-000000000006'),
+  'Equivalenza: stessi punteggi da ingest e override');
+
+-- =============================================================
+-- TEST 12: admin_release_override — rilascio con audit
+-- =============================================================
+select set_config('role', 'postgres', true);
+select set_config('request.jwt.claims',
+  '{"sub":"dddddddd-0000-0000-0000-000000000002","role":"authenticated"}', true);
+select public.admin_release_override('M8', 'Override revocato: dati provider corretti');
+reset role;
+
+select pg_temp.assert_eq((select manual_override from matches where id='cccccccc-0000-0000-0000-000000000006'),
+                 false, 'Release: manual_override = false');
+select pg_temp.assert_eq((select count(*)::int from admin_audit_log
+                  where action='ADMIN_RELEASE_OVERRIDE' and entity_id='cccccccc-0000-0000-0000-000000000006'),
+                 1::int, 'Release: audit registrato');
+
+-- =============================================================
+-- TEST 13: audit APPEND-ONLY — nemmeno l'admin modifica/cancella
+-- =============================================================
+do $$
+declare
+  v_rows_before int; v_rows_after int;
+begin
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    '{"sub":"dddddddd-0000-0000-0000-000000000002","role":"authenticated"}', true);
+  select count(*) into v_rows_before from admin_audit_log;
+  begin
+    update admin_audit_log set payload = '{"hacked":true}';
+  exception when insufficient_privilege then
+    null; -- revoke update attesa
+  end;
+  begin
+    delete from admin_audit_log;
+  exception when insufficient_privilege then
+    null; -- revoke delete attesa
+  end;
+  select count(*) into v_rows_after from admin_audit_log;
+  perform pg_temp.assert_eq(v_rows_after, v_rows_before::int,
+    'Audit APPEND-ONLY: update/delete impossibili nemmeno da admin');
 end $$;
 
 select set_config('role', 'postgres', true);

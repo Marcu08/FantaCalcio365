@@ -30,6 +30,22 @@ Deno.test("401 se JWT assente/non valido", async () => {
   resetMockFactory();
 });
 
+Deno.test("400 generico con JSON non valido (nessun errore grezzo)", async () => {
+  const adminClient = makeAdminClient();
+  setMockFactory(() => adminClient.client);
+  const mod = await importIndex("../admin-override/index.ts");
+  const res = await mod.handler(new Request("http://x/", {
+    method: "POST",
+    headers: { Authorization: ADMIN_JWT, "Content-Type": "application/json" },
+    body: '{"provider_id": "M1", BROKEN',
+  }));
+  assertEquals(res.status, 400);
+  const json = await res.json();
+  assertEquals(json?.error, "Payload non valido");
+  assertEquals(String(json).includes("SyntaxError"), false, "nessun dettaglio interno esposto");
+  resetMockFactory();
+});
+
 Deno.test("403 se utente non admin", async () => {
   setMockFactory(() => ({
     auth: { getUser: async () => ({ data: { user: { id: "u1" } }, error: null }) },

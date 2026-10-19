@@ -1,7 +1,9 @@
 -- =============================================================
 -- FantaCalcio365 - 0008_cache_and_audit.sql
--- FASE 2: cache eventi provider, override manuale admin, audit trail.
--- Applicabile su database gia' popolato: solo ADD COLUMN / CREATE.
+-- FASE 2/3: cache eventi provider, override manuale admin, audit trail,
+-- privilegi minimi sulle funzioni interne.
+-- Applicabile su database gia' popolato: solo ADD COLUMN / CREATE /
+-- REPLACE di funzioni. NON ancora applicata a nessun DB persistente.
 -- =============================================================
 
 -- =============================================================
@@ -16,7 +18,14 @@ set search_path = public, pg_temp as $$
   select coalesce((select is_admin from profiles where id = auth.uid()), false);
 $$;
 
+-- =============================================================
+-- 0-bis. Privilegi minimi sulle funzioni interne (definizione qui,
+--        GRANT/REVOKE aggregati in fondo al file per leggibilita')
+-- =============================================================
+
+-- =============================================================
 -- 1. Cache grezza delle risposte provider ----------------------
+-- =============================================================
 create table event_cache (
   provider_match_id text primary key,
   match_id uuid not null references matches(id) on delete cascade,
@@ -41,6 +50,12 @@ alter table matches
 alter table admin_audit_log
   add column if not exists old_value jsonb,
   add column if not exists new_value jsonb;
+
+-- Audit APPEND-ONLY: nessun update/delete dai ruoli client
+revoke update, delete on admin_audit_log from authenticated, anon;
+
+-- is_admin NON modificabile dal client (colonna)
+revoke update (is_admin) on profiles from authenticated;
 
 -- =============================================================
 -- 4. Helper cache (solo service_role) ---------------------------
@@ -84,22 +99,90 @@ set search_path = public, pg_temp as $$
   );
 $$;
 
-revoke all on function public.cache_match_events(text, uuid, jsonb, jsonb, text, timestamptz)
-  from public, anon, authenticated;
-revoke all on function public.cache_is_fresh(text, int)
-  from public, anon, authenticated;
-grant execute on function public.cache_match_events(text, uuid, jsonb, jsonb, text, timestamptz)
-  to service_role;
-grant execute on function public.cache_is_fresh(text, int) to service_role;
+-- =============================================================
+-- 5. Funzione interna condivisa: inserimento eventi + stats.
+--    USATA SIA DA ingest_match_result CHE DA admin_override_match,
+--    cosi' gli stessi eventi producono sempre le stesse stats/punteggi.
+--
+--    REGOLE STATS (colonne di player_match_stats):
+--      match_id, player_id, played_minutes, is_starting, goals,
+--      yellow_cards, conceded_goals, gol_bonus_pts,
+--      clean_sheet_bonus_pts, frozen_at
+--    Questa funzione aggiorna SOLO: goals (mai per autogol!),
+--    yellow_cards. NON tocca: played_minutes, is_starting,
+--    conceded_goals, gol_bonus_pts, clean_sheet_bonus_pts, frozen_at
+--    (bonus congelati dal modello §6; minuti/gol subiti da sync dedicata).
+-- =============================================================
+create or replace function public.upsert_events_from_json(
+  p_match_id uuid,
+  p_events jsonb
+) returns void
+language plpgsql security definer
+set search_path = public, pg_temp as $$
+declare
+  ev jsonb;
+  v_player uuid;
+  v_related uuid;
+begin
+  -- Validazione: giocatori devono esistere (evita FK sospese a runtime)
+  for ev in select * from jsonb_array_elements(p_events) loop
+    if ev->>'player' is not null then
+      select id into v_player from players where provider_id = ev->>'player';
+      if v_player is null then
+        raise exception 'Giocatore % inesistente', ev->>'player';
+      end if;
+    end if;
+    if ev->>'related_player' is not null then
+      select id into v_related from players where provider_id = ev->>'related_player';
+      if v_related is null then
+        raise exception 'related_player % inesistente', ev->>'related_player';
+      end if;
+    end if;
+  end loop;
+
+  -- event_order univoco nell'insieme fornito
+  if exists (
+    select 1 from jsonb_array_elements(p_events) e(e)
+    group by e->>'event_order'
+    having count(*) > 1
+  ) then
+    raise exception 'event_order duplicati nel set eventi';
+  end if;
+
+  for ev in select * from jsonb_array_elements(p_events) loop
+    insert into match_events (match_id, event_order, minute, type, player_id,
+                              related_player_id, is_own_goal, is_penalty, is_official)
+    values (
+      p_match_id,
+      (ev->>'event_order')::int,
+      (ev->>'minute')::int,
+      ev->>'type',
+      (select id from players where provider_id = ev->>'player'),
+      (select id from players where provider_id = ev->>'related_player'),
+      coalesce((ev->>'own_goal')::boolean, false),
+      coalesce((ev->>'penalty')::boolean, false),
+      true
+    );
+
+    -- GOAL: l'autogol NON assegna mai goal allo stat del giocatore
+    -- (il bonus marcatore deriva da goals > 0, §5)
+    if ev->>'type' = 'GOAL' and ev->>'player' is not null
+       and coalesce((ev->>'own_goal')::boolean, false) = false then
+      insert into player_match_stats (match_id, player_id, goals)
+      values (p_match_id, (select id from players where provider_id = ev->>'player'), 1)
+      on conflict (match_id, player_id) do update set goals = player_match_stats.goals + 1;
+    elsif ev->>'type' = 'YELLOW' and ev->>'player' is not null then
+      insert into player_match_stats (match_id, player_id, yellow_cards)
+      values (p_match_id, (select id from players where provider_id = ev->>'player'), 1)
+      on conflict (match_id, player_id) do update set yellow_cards = player_match_stats.yellow_cards + 1;
+    end if;
+  end loop;
+end $$;
 
 -- =============================================================
--- 5. score_match v2: upsert + audit aggregato -------------------
+-- 6. score_match v2: upsert + audit aggregato -------------------
 -- =============================================================
 
--- Sostituisce la versione di 0003. Cambi chiave:
---  * upsert (ON CONFLICT DO UPDATE ... WHERE total diverso) al posto di DELETE+INSERT
---  * UNA riga di audit per partita (non per utente), solo se almeno un totale e' cambiato
---  * ricerca del partita con lock di riga (FOR UPDATE) per concorrenza
 create or replace function public.score_match(p_match_id uuid)
 returns void
 language plpgsql security definer
@@ -108,7 +191,7 @@ declare
   m record;
   v_sum_old numeric;
   v_sum_new numeric;
-  v_changed int;
+  v_rows_old int;
 begin
   -- Lock di riga: nessun override/cron concorrente sulla stessa partita
   select * into m from matches where id = p_match_id for update;
@@ -117,17 +200,16 @@ begin
     raise exception 'Partita % non terminata', p_match_id;
   end if;
 
-  select coalesce(sum(total), 0), count(*) into v_sum_old, v_changed
+  select coalesce(sum(total), 0), count(*) into v_sum_old, v_rows_old
   from scores where match_id = p_match_id;
 
-  -- la funzione puo' girare piu' volte nella stessa transazione (override +
-  -- ricalcoli): la temp table va ricreata senza collisione
   drop table if exists tmp_pred;
   create temp table tmp_pred on commit drop as
     select pr.*, pr2.player_id, pr2.is_marked_scorer
     from predictions pr
     join prediction_players pr2 on pr2.prediction_id = pr.id
     where pr.match_id = p_match_id;
+
   insert into scores (user_id, match_id, season_id, matchday,
                       pts_ht, pts_ht2, pts_scorers, pts_clean_sheet,
                       pts_sub, pts_yellow, total, exact_ht, exact_ht2,
@@ -202,18 +284,136 @@ begin
 
   select coalesce(sum(total), 0) into v_sum_new from scores where match_id = p_match_id;
 
-  -- UNA riga di audit per partita, solo se qualcosa e' cambiato
-  if v_sum_new is distinct from v_sum_old or v_changed <> (select count(*) from scores where match_id = p_match_id) then
+  -- UNA riga di audit per partita, solo se qualcosa e' cambiato.
+  -- Formato entity_id: uuid interno della partita (uniforme con
+  -- ADMIN_OVERRIDE); provider_id incluso nei valori.
+  if v_sum_new is distinct from v_sum_old
+     or v_rows_old <> (select count(*) from scores where match_id = p_match_id) then
     insert into admin_audit_log (actor_id, action, entity, entity_id, old_value, new_value)
     values (auth.uid(), 'SCORE_RECALC', 'match', p_match_id::text,
-            jsonb_build_object('sum', v_sum_old, 'rows', v_changed),
-            jsonb_build_object('sum', v_sum_new, 'rows',
+            jsonb_build_object('match_provider_id', m.provider_id,
+                               'sum', v_sum_old, 'rows', v_rows_old),
+            jsonb_build_object('match_provider_id', m.provider_id,
+                               'sum', v_sum_new, 'rows',
                                (select count(*) from scores where match_id = p_match_id)));
   end if;
 end $$;
 
+-- Primo giocatore che ESCE in una sostituzione (§8)
+create or replace function public.first_sub_out(p_match_id uuid)
+returns uuid language sql stable security definer set search_path = public, pg_temp as $$
+  select player_id from match_events
+  where match_id = p_match_id and type = 'SUB_OUT' and player_id is not null
+  order by event_order asc
+  limit 1;
+$$;
+
+-- Primo ammonito IN CAMPO (§8)
+create or replace function public.first_yellow(p_match_id uuid)
+returns uuid language sql stable security definer set search_path = public, pg_temp as $$
+  select player_id from match_events
+  where match_id = p_match_id and type = 'YELLOW' and player_id is not null
+  order by event_order asc
+  limit 1;
+$$;
+
+-- Correzione ufficiale: ricalcolo + log dei delta (§11)
+create or replace function public.apply_official_correction(
+  p_match_id uuid, p_reason text, p_source_event uuid default null
+) returns void
+language plpgsql security definer
+set search_path = public, pg_temp as $$
+declare
+  v_old_sum numeric;
+  v_new_sum numeric;
+begin
+  select coalesce(sum(total), 0) into v_old_sum from scores where match_id = p_match_id;
+
+  drop table if exists tmp_old_scores;
+  create temp table tmp_old_scores as
+    select user_id, total from scores where match_id = p_match_id;
+
+  perform public.score_match(p_match_id);
+
+  select coalesce(sum(total), 0) into v_new_sum from scores where match_id = p_match_id;
+
+  if v_new_sum is distinct from v_old_sum then
+    insert into score_corrections (match_id, user_id, old_total, new_total, reason, source_event_id)
+    select p_match_id, o.user_id, o.total, s.total, p_reason, p_source_event
+    from tmp_old_scores o join scores s
+      on s.user_id = o.user_id
+    where s.match_id = p_match_id and o.total <> s.total;
+  end if;
+end $$;
+
 -- =============================================================
--- 6. admin_override_match: correzione manuale admin -------------
+-- 7. ingest_match_result v3: lock + check override PRIMA,
+--    validazioni di coerenza, helper condiviso -------------------
+-- =============================================================
+
+create or replace function public.ingest_match_result(
+  p_provider_id text, p_result jsonb
+) returns void
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+  v_match_id uuid;
+  v_manual boolean;
+  v_status text := p_result->>'status';
+  v_ht int; v_away int; v_h2 int; v_a2 int; v_fh int; v_fa int;
+begin
+  -- Sequenza voluta: PRIMA il lock di riga, POI la lettura di manual_override
+  select id, manual_override into v_match_id, v_manual
+  from matches where provider_id = p_provider_id for update;
+  if v_match_id is null then raise exception 'Partita % non trovata', p_provider_id; end if;
+
+  -- Le correzioni manuali dell'admin prevalgono sul provider
+  if v_manual then return; end if;
+
+  -- Chiavi obbligatorie e in range (nessun null implicito)
+  v_ht := (p_result->>'ht_home')::int;
+  v_away := (p_result->>'ht_away')::int;
+  v_h2 := (p_result->>'ht2_home')::int;
+  v_a2 := (p_result->>'ht2_away')::int;
+  v_fh := (p_result->>'ft_home')::int;
+  v_fa := (p_result->>'ft_away')::int;
+  if v_ht is null or v_away is null or v_h2 is null or v_a2 is null
+     or v_fh is null or v_fa is null
+     or v_ht < 0 or v_away < 0 or v_h2 < 0 or v_a2 < 0
+     or v_fh < 0 or v_fa < 0 or v_fh > 20 or v_fa > 20 then
+    raise exception 'Risultato incompleto o fuori range per %', p_provider_id;
+  end if;
+
+  -- Coerenza: ft = ht + ht2 (per entrambe le squadre)
+  if v_fh <> v_ht + v_h2 or v_fa <> v_away + v_a2 then
+    raise exception 'Risultato incoerente per %: ft <> ht + ht2', p_provider_id;
+  end if;
+
+  -- Coerenza eventi: numero gol (autogol INCLUSI) = ft
+  if (select count(*) from jsonb_array_elements(p_result->'events')
+      where value->>'type' = 'GOAL') <> (v_fh + v_fa) then
+    raise exception 'Numero eventi GOAL incoerente col risultato per %', p_provider_id;
+  end if;
+
+  update matches set
+    status = v_status,
+    ht_home_goals = v_ht, ht_away_goals = v_away,
+    ht2_home_goals = v_h2, ht2_away_goals = v_a2,
+    ft_home_goals = v_fh, ft_away_goals = v_fa,
+    data_confirmed_at = case when v_status = 'CONFIRMED' then now() else data_confirmed_at end
+  where id = v_match_id;
+
+  -- Sostituzione completa del set eventi/stats (helper condiviso)
+  delete from match_events where match_id = v_match_id;
+  update player_match_stats set goals = 0, yellow_cards = 0 where match_id = v_match_id;
+  perform public.upsert_events_from_json(v_match_id, p_result->'events');
+
+  if v_status in ('FINISHED','CONFIRMED') then
+    perform public.score_match(v_match_id);
+  end if;
+end $$;
+
+-- =============================================================
+-- 8. admin_override_match: correzione manuale admin -------------
 -- =============================================================
 
 create or replace function public.admin_override_match(
@@ -228,8 +428,7 @@ declare
   v_match_id uuid;
   v_old jsonb;
   v_status text := p_result->>'status';
-  ev jsonb;
-  v_player uuid;
+  v_ht int; v_away int; v_h2 int; v_a2 int; v_fh int; v_fa int;
 begin
   -- L'attore e' SEMPRE auth.uid() (il JWT con cui la RPC viene chiamata)
   if not public.is_admin() then
@@ -245,7 +444,28 @@ begin
   select id into v_match_id from matches where provider_id = p_provider_id for update;
   if v_match_id is null then raise exception 'Partita % non trovata', p_provider_id; end if;
 
+  v_ht := (p_result->>'ht_home')::int;
+  v_away := (p_result->>'ht_away')::int;
+  v_h2 := (p_result->>'ht2_home')::int;
+  v_a2 := (p_result->>'ht2_away')::int;
+  v_fh := (p_result->>'ft_home')::int;
+  v_fa := (p_result->>'ft_away')::int;
+  if v_ht is null or v_away is null or v_h2 is null or v_a2 is null
+     or v_fh is null or v_fa is null
+     or v_ht < 0 or v_away < 0 or v_h2 < 0 or v_a2 < 0
+     or v_fh < 0 or v_fa < 0 or v_fh > 20 or v_fa > 20 then
+    raise exception 'Risultato incompleto o fuori range';
+  end if;
+  if v_fh <> v_ht + v_h2 or v_fa <> v_away + v_a2 then
+    raise exception 'Risultato incoerente: ft <> ht + ht2';
+  end if;
+  if (select count(*) from jsonb_array_elements(p_events)
+      where value->>'type' = 'GOAL') <> (v_fh + v_fa) then
+    raise exception 'Numero eventi GOAL incoerente col risultato';
+  end if;
+
   select jsonb_build_object(
+    'match_provider_id', provider_id,
     'status', status, 'ht', jsonb_build_array(ht_home_goals, ht_away_goals),
     'ht2', jsonb_build_array(ht2_home_goals, ht2_away_goals),
     'ft', jsonb_build_array(ft_home_goals, ft_away_goals),
@@ -255,68 +475,21 @@ begin
       from match_events where match_id = matches.id)
   ) into v_old from matches where id = v_match_id;
 
-  -- Validazione giocatori: tutti devono esistere
-  for ev in select jsonb_array_elements(p_events) loop
-    if ev->>'player' is not null then
-      select id into v_player from players where provider_id = ev->>'player';
-      if v_player is null then
-        raise exception 'Giocatore % inesistente', ev->>'player';
-      end if;
-    end if;
-  end loop;
-
-  -- event_order univoco nell'insieme fornito
-  if exists (
-    select 1 from jsonb_array_elements(p_events) e(e)
-    group by e->>'event_order'
-    having count(*) > 1
-  ) then
-    raise exception 'event_order duplicati nel set eventi';
-  end if;
-
   update matches set
     status = v_status,
-    ht_home_goals = (p_result->>'ht_home')::int,
-    ht_away_goals = (p_result->>'ht_away')::int,
-    ht2_home_goals = (p_result->>'ht2_home')::int,
-    ht2_away_goals = (p_result->>'ht2_away')::int,
-    ft_home_goals = (p_result->>'ft_home')::int,
-    ft_away_goals = (p_result->>'ft_away')::int,
+    ht_home_goals = v_ht, ht_away_goals = v_away,
+    ht2_home_goals = v_h2, ht2_away_goals = v_a2,
+    ft_home_goals = v_fh, ft_away_goals = v_fa,
     data_confirmed_at = case when v_status = 'CONFIRMED' then now() else data_confirmed_at end,
-    -- protegge la correzione dal cron (§ cron-tasks salta manual_override = true)
     manual_override = true,
     override_by = auth.uid(),
     override_at = now()
   where id = v_match_id;
 
-  -- Sostituzione completa del set eventi: azzero prima le statistiche
-  -- individuali di partita (altrimenti l'override somma ai valori precedenti)
-  update player_match_stats set goals = 0, yellow_cards = 0 where match_id = v_match_id;
+  -- Sostituzione completa del set eventi/stats (helper condiviso)
   delete from match_events where match_id = v_match_id;
-  for ev in select * from jsonb_array_elements(p_events) loop
-    insert into match_events (match_id, event_order, minute, type, player_id,
-                              related_player_id, is_own_goal, is_penalty, is_official)
-    values (
-      v_match_id,
-      (ev->>'event_order')::int,
-      (ev->>'minute')::int,
-      ev->>'type',
-      (select id from players where provider_id = ev->>'player'),
-      (select id from players where provider_id = ev->>'related_player'),
-      coalesce((ev->>'own_goal')::boolean, false),
-      coalesce((ev->>'penalty')::boolean, false),
-      true
-    );
-    if ev->>'type' = 'GOAL' and ev->>'player' is not null then
-      insert into player_match_stats (match_id, player_id, goals)
-      values (v_match_id, (select id from players where provider_id = ev->>'player'), 1)
-      on conflict (match_id, player_id) do update set goals = player_match_stats.goals + 1;
-    elsif ev->>'type' = 'YELLOW' and ev->>'player' is not null then
-      insert into player_match_stats (match_id, player_id, yellow_cards)
-      values (v_match_id, (select id from players where provider_id = ev->>'player'), 1)
-      on conflict (match_id, player_id) do update set yellow_cards = player_match_stats.yellow_cards + 1;
-    end if;
-  end loop;
+  update player_match_stats set goals = 0, yellow_cards = 0 where match_id = v_match_id;
+  perform public.upsert_events_from_json(v_match_id, p_events);
 
   perform public.apply_official_correction(v_match_id, p_reason);
 
@@ -325,117 +498,119 @@ begin
     auth.uid(), 'ADMIN_OVERRIDE', 'match', v_match_id::text,
     v_old,
     jsonb_build_object(
+      'match_provider_id', p_provider_id,
       'status', v_status,
-      'ht', jsonb_build_array((p_result->>'ht_home')::int, (p_result->>'ht_away')::int),
-      'ht2', jsonb_build_array((p_result->>'ht2_home')::int, (p_result->>'ht2_away')::int),
-      'ft', jsonb_build_array((p_result->>'ft_home')::int, (p_result->>'ft_away')::int),
+      'ht', jsonb_build_array(v_ht, v_away),
+      'ht2', jsonb_build_array(v_h2, v_a2),
+      'ft', jsonb_build_array(v_fh, v_fa),
       'events', p_events
     ),
     jsonb_build_object('reason', p_reason)
   );
 end $$;
 
-revoke all on function public.admin_override_match(text, jsonb, jsonb, text)
-  from public, anon;
--- Necessario EXECUTE a authenticated: l'Edge Function chiama la RPC con il JWT
--- dell'admin (ruolo authenticated). La protezione e' la guard is_admin() interna,
--- non il REVOKE (che bloccherebbe anche gli admin legitimi).
-grant execute on function public.admin_override_match(text, jsonb, jsonb, text) to authenticated;
+-- =============================================================
+-- 9. admin_release_override: riporta la partita al controllo del
+--    cron ( stessi controlli, con audit) ------------------------
+-- =============================================================
 
--- apply_official_correction v2: idem versione 0003 ma con temp table
--- protetta da collisione (la funzione puo' girare piu' volte per transazione)
-create or replace function public.apply_official_correction(
-  p_match_id uuid, p_reason text, p_source_event uuid default null
+create or replace function public.admin_release_override(
+  p_provider_id text,
+  p_reason text
 ) returns void
 language plpgsql security definer
 set search_path = public, pg_temp as $$
 declare
-  v_old_sum numeric;
-  v_new_sum numeric;
-begin
-  select coalesce(sum(total), 0) into v_old_sum from scores where match_id = p_match_id;
-
-  -- snapshot per il log dei delta utente-per-utente
-  drop table if exists tmp_old_scores;
-  create temp table tmp_old_scores as
-    select user_id, total from scores where match_id = p_match_id;
-
-  perform public.score_match(p_match_id);
-
-  select coalesce(sum(total), 0) into v_new_sum from scores where match_id = p_match_id;
-
-  -- score_match scrive gia' l'audit SCORE_RECALC quando qualcosa cambia;
-  -- qui si registra solo la correzione admin se effettivamente ci fu un delta
-  if v_new_sum is distinct from v_old_sum then
-    insert into score_corrections (match_id, user_id, old_total, new_total, reason, source_event_id)
-    select p_match_id, o.user_id, o.total, s.total, p_reason, p_source_event
-    from tmp_old_scores o join scores s
-      on s.user_id = o.user_id
-    where s.match_id = p_match_id and o.total <> s.total;
-  end if;
-end $$;
-
--- ingest_match_result v2: lock di riga + salto manual_override
-create or replace function public.ingest_match_result(
-  p_provider_id text, p_result jsonb
-) returns void
-language plpgsql security definer set search_path = public, pg_temp as $$
-declare
   v_match_id uuid;
-  v_status text := p_result->>'status';
-  ev jsonb;
+  v_old jsonb;
 begin
+  if not public.is_admin() then
+    raise exception 'Solo gli amministratori possono rilasciare un override';
+  end if;
+  if auth.uid() is null then
+    raise exception 'Chiamata senza JWT valido: attore non identificabile';
+  end if;
+  if p_reason is null or length(trim(p_reason)) < 5 then
+    raise exception 'Motivazione obbligatoria (min 5 caratteri)';
+  end if;
+
   select id into v_match_id from matches where provider_id = p_provider_id for update;
   if v_match_id is null then raise exception 'Partita % non trovata', p_provider_id; end if;
-
-  -- Le correzioni manuali dell'admin prevalgono sul provider
-  if exists (select 1 from matches where id = v_match_id and manual_override) then
-    return;
+  if not exists (select 1 from matches where id = v_match_id and manual_override) then
+    raise exception 'Nessun override attivo sulla partita %', p_provider_id;
   end if;
+
+  select jsonb_build_object('match_provider_id', provider_id, 'manual_override', manual_override,
+    'override_by', override_by, 'override_at', override_at)
+  into v_old from matches where id = v_match_id;
 
   update matches set
-    status = v_status,
-    ht_home_goals = (p_result->>'ht_home')::int,
-    ht_away_goals = (p_result->>'ht_away')::int,
-    ht2_home_goals = (p_result->>'ht2_home')::int,
-    ht2_away_goals = (p_result->>'ht2_away')::int,
-    ft_home_goals = (p_result->>'ft_home')::int,
-    ft_away_goals = (p_result->>'ft_away')::int,
-    data_confirmed_at = case when v_status = 'CONFIRMED' then now() else data_confirmed_at end
+    manual_override = false,
+    override_by = null,
+    override_at = null
   where id = v_match_id;
 
-  for ev in select * from jsonb_array_elements(p_result->'events')
-  loop
-    insert into match_events (match_id, event_order, minute, type, player_id,
-                              related_player_id, is_own_goal, is_penalty, is_official)
-    values (
-      v_match_id,
-      (ev->>'event_order')::int,
-      (ev->>'minute')::int,
-      ev->>'type',
-      (select id from players where provider_id = ev->>'player'),
-      (select id from players where provider_id = ev->>'related_player'),
-      coalesce((ev->>'own_goal')::boolean, false),
-      coalesce((ev->>'penalty')::boolean, false),
-      v_status = 'CONFIRMED'
-    )
-    on conflict (match_id, event_order, type) do update set
-      minute = excluded.minute,
-      player_id = excluded.player_id,
-      is_official = excluded.is_official;
-
-    if ev->>'type' = 'GOAL' and ev->>'player' is not null then
-      insert into player_match_stats (match_id, player_id, goals)
-      values (v_match_id, (select id from players where provider_id = ev->>'player'), 1)
-      on conflict (match_id, player_id) do update set goals = player_match_stats.goals + 1;
-    elsif ev->>'type' = 'YELLOW' and ev->>'player' is not null then
-      insert into player_match_stats (match_id, player_id, yellow_cards)
-      values (v_match_id, (select id from players where provider_id = ev->>'player'), 1)
-      on conflict (match_id, player_id) do update set yellow_cards = player_match_stats.yellow_cards + 1;
-    end if;
-  end loop;
-
-  if v_status in ('FINISHED','CONFIRMED') then
-    perform public.score_match(v_match_id);
-  end if;
+  insert into admin_audit_log (actor_id, action, entity, entity_id, old_value, new_value, payload)
+  values (
+    auth.uid(), 'ADMIN_RELEASE_OVERRIDE', 'match', v_match_id::text,
+    v_old,
+    jsonb_build_object('match_provider_id', p_provider_id,
+                       'manual_override', false, 'override_by', null, 'override_at', null),
+    jsonb_build_object('reason', p_reason)
+  );
 end $$;
+
+-- =============================================================
+-- 10. Privilegi aggregati ---------------------------------------
+-- =============================================================
+
+-- Cache: SOLO service_role
+revoke all on function public.cache_match_events(text, uuid, jsonb, jsonb, text, timestamptz)
+  from public, anon, authenticated;
+revoke all on function public.cache_is_fresh(text, int)
+  from public, anon, authenticated;
+grant execute on function public.cache_match_events(text, uuid, jsonb, jsonb, text, timestamptz)
+  to service_role;
+grant execute on function public.cache_is_fresh(text, int) to service_role;
+
+-- Funzioni interne di scoring/sync: SOLO service_role
+revoke all on function public.score_match(uuid)
+  from public, anon, authenticated;
+revoke all on function public.ingest_match_result(text, jsonb)
+  from public, anon, authenticated;
+revoke all on function public.apply_official_correction(uuid, text, uuid)
+  from public, anon, authenticated;
+revoke all on function public.first_sub_out(uuid) from public, anon, authenticated;
+revoke all on function public.first_yellow(uuid) from public, anon, authenticated;
+revoke all on function public.upsert_events_from_json(uuid, jsonb)
+  from public, anon, authenticated;
+revoke all on function public.freeze_matchday_bonuses(uuid, int)
+  from public, anon, authenticated;
+revoke all on function public.lock_matchday(uuid, int) from public, anon, authenticated;
+revoke all on function public.lock_due_matchdays() from public, anon, authenticated;
+revoke all on function public.validate_prediction()
+  from public, anon, authenticated;
+revoke all on function public.handle_new_user() from public, anon, authenticated;
+
+grant execute on function public.score_match(uuid) to service_role;
+grant execute on function public.ingest_match_result(text, jsonb) to service_role;
+grant execute on function public.apply_official_correction(uuid, text, uuid) to service_role;
+grant execute on function public.first_sub_out(uuid) to service_role;
+grant execute on function public.first_yellow(uuid) to service_role;
+grant execute on function public.upsert_events_from_json(uuid, jsonb) to service_role;
+grant execute on function public.freeze_matchday_bonuses(uuid, int) to service_role;
+grant execute on function public.lock_matchday(uuid, int) to service_role;
+grant execute on function public.lock_due_matchdays() to service_role;
+
+-- Override/release: EXECUTE a authenticated (guard is_admin() interna)
+revoke all on function public.admin_override_match(text, jsonb, jsonb, text)
+  from public, anon;
+revoke all on function public.admin_release_override(text, text)
+  from public, anon;
+grant execute on function public.admin_override_match(text, jsonb, jsonb, text) to authenticated;
+grant execute on function public.admin_release_override(text, text) to authenticated;
+
+-- is_admin e helper gruppi: usati dalle policy RLS → servono a authenticated
+grant execute on function public.is_admin() to authenticated;
+grant execute on function public.is_group_member(uuid) to authenticated;
+grant execute on function public.is_group_owner(uuid) to authenticated;
