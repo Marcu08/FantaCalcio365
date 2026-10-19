@@ -39,10 +39,12 @@ values ('cccccccc-0000-0000-0000-000000000001','11111111-1111-1111-1111-11111111
         1, 0,   1, 1,   2, 1);
 -- Partita reale: 1T 1-0, 2T 1-1, finale 2-1
 
--- Utenti di prova: creati manualmente in profiles (bypass auth nei test)
-insert into profiles (id, username) values
-  ('dddddddd-0000-0000-0000-000000000001','utente1'),
-  ('dddddddd-0000-0000-0000-000000000002','utente2');
+-- Utenti di prova: creati in auth.users (il trigger on_auth_user_created
+-- genera automaticamente i profili in profiles)
+insert into auth.users (id, aud, role, email, encrypted_password, email_confirmed_at,
+                        created_at, updated_at, raw_user_meta_data) values
+  ('dddddddd-0000-0000-0000-000000000001','authenticated','authenticated','u1@test.local','x',now(),now(),now(),'{"username":"utente1"}'),
+  ('dddddddd-0000-0000-0000-000000000002','authenticated','authenticated','u2@test.local','x',now(),now(),now(),'{"username":"utente2"}');
 
 -- Statistiche giocatori (bonus congelati)
 insert into player_match_stats (match_id, player_id, played_minutes, goals, conceded_goals,

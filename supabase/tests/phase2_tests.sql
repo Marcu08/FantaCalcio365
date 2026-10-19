@@ -48,10 +48,12 @@ insert into match_events (match_id, event_order, minute, type, player_id) values
   ('cccccccc-0000-0000-0000-000000000001',1,30,'GOAL','bbbbbbbb-0000-0000-0000-000000000002'),
   ('cccccccc-0000-0000-0000-000000000001',2,75,'GOAL','bbbbbbbb-0000-0000-0000-000000000004');
 
--- Utenti
-insert into profiles (id, username, is_admin) values
-  ('dddddddd-0000-0000-0000-000000000001','utente1',false),
-  ('dddddddd-0000-0000-0000-000000000002','admin1',true);
+-- Utenti: auth.users (trigger crea i profili) + admin elevato a mano
+insert into auth.users (id, aud, role, email, encrypted_password, email_confirmed_at,
+                        created_at, updated_at, raw_user_meta_data) values
+  ('dddddddd-0000-0000-0000-000000000001','authenticated','authenticated','u1@test.local','x',now(),now(),now(),'{"username":"utente1"}'),
+  ('dddddddd-0000-0000-0000-000000000002','authenticated','authenticated','admin@test.local','x',now(),now(),now(),'{"username":"admin1"}');
+update profiles set is_admin = true where id = 'dddddddd-0000-0000-0000-000000000002';
 
 insert into predictions (id, user_id, match_id, ht_home, ht_away, ht2_home, ht2_away,
                          first_sub_out_player_id, first_yellow_player_id) values
