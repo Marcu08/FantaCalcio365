@@ -6,9 +6,10 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.EventNote
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -30,13 +31,12 @@ class MainActivity : ComponentActivity() {
 }
 
 sealed class Dest(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    object Home : Dest("home", "Home", Icons.Default.Schedule)
-    object Calendar : Dest("calendar", "Calendario", Icons.Default.EmojiEvents)
+    object Home : Dest("home", "Home", Icons.Default.Home)
+    object Calendar : Dest("calendar", "Calendario", Icons.Default.EventNote)
     object Leaderboard : Dest("leaderboard", "Classifica", Icons.Default.EmojiEvents)
     object Groups : Dest("groups", "Gruppi", Icons.Default.Groups)
     object Profile : Dest("profile", "Profilo", Icons.Default.Person)
 }
-
 @Composable
 fun AppRoot(vm: AppViewModel = viewModel()) {
     val navController = rememberNavController()
@@ -48,7 +48,7 @@ fun AppRoot(vm: AppViewModel = viewModel()) {
         bottomBar = {
             if (profile != null) {
                 NavigationBar {
-                    listOf(Dest.Home, Dest.Leaderboard, Dest.Groups, Dest.Profile).forEach { d ->
+                    listOf(Dest.Home, Dest.Calendar, Dest.Leaderboard, Dest.Groups, Dest.Profile).forEach { d ->
                         NavigationBarItem(
                             selected = current == d.route,
                             onClick = { navController.navigate(d.route) { popUpTo(Dest.Home.route); launchSingleTop = true } },
