@@ -179,9 +179,9 @@ insert into scores (user_id, match_id, season_id, matchday, total, exact_ht, exa
 
 -- ranking atteso: parita' totale su punti/esatti/marcatori → decide first_submission
 create temp table t_rank as
-select user_id, total, exact_ht + exact_ht2 as exacts, exact_scorers, first_submitted_at,
+select user_id, total, exact_ht::int + exact_ht2::int as exacts, exact_scorers, first_submitted_at,
        row_number() over (
-         order by total desc, (exact_ht + exact_ht2) desc, exact_scorers desc, first_submitted_at asc
+         order by total desc, (exact_ht::int + exact_ht2::int) desc, exact_scorers desc, first_submitted_at asc
        ) as pos
 from scores where season_id = '11111111-1111-1111-1111-111111111111';
 
@@ -195,7 +195,7 @@ select a.user_id
 from scores a join scores b
   on a.user_id <> b.user_id and a.match_id = b.match_id
 where a.total = b.total
-  and (a.exact_ht + a.exact_ht2) = (b.exact_ht + b.exact_ht2)
+  and (a.exact_ht::int + a.exact_ht2::int) = (b.exact_ht::int + b.exact_ht2::int)
   and a.exact_scorers = b.exact_scorers
   and a.first_submitted_at = b.first_submitted_at;
 
