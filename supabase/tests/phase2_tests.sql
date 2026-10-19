@@ -591,8 +591,8 @@ select pg_temp.assert_eq((select conceded_goals from player_match_stats
                     and player_id='bbbbbbbb-0000-0000-0000-000000000001'),
                  1::int, 'Override: conceded_goals del GK ricalcolato = 1');
 select pg_temp.assert_eq((select total from scores where match_id='cccccccc-0000-0000-0000-000000000007'),
-                 29.0::numeric,
-                 'Override: porta inviolata PERSA (20->0+0+bonus P4 9 = 29)');
+                 9.0::numeric,
+                 'Override: combo perso (1T solo nel combo), P1 senza porta inviolata: 0+0+9 = 9');
 
 -- =============================================================
 -- TEST 15: evento GOAL = prova di presenza (played_minutes), bonus valido
