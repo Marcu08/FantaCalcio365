@@ -199,7 +199,7 @@ where a.total = b.total
   and a.exact_scorers = b.exact_scorers
   and a.first_submitted_at = b.first_submitted_at;
 
-select pg_temp.assert_eq((select count(*) from t_tie), 0::int,
+select pg_temp.assert_eq((select count(*)::int from t_tie), 0::int,
   'Parita'' totale (anche orario): nessun criterio li separa, posto condiviso');
 
 rollback;
