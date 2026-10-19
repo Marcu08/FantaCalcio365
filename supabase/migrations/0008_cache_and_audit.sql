@@ -321,8 +321,11 @@ begin
 end $$;
 
 revoke all on function public.admin_override_match(text, jsonb, jsonb, text, uuid)
-  from public, anon, authenticated;
-grant execute on function public.admin_override_match(text, jsonb, jsonb, text, uuid) to service_role;
+  from public, anon;
+-- Necessario EXECUTE a authenticated: l'Edge Function chiama la RPC con il JWT
+-- dell'admin (ruolo authenticated). La protezione e' la guard is_admin() interna,
+-- non il REVOKE (che bloccherebbe anche gli admin legitimi).
+grant execute on function public.admin_override_match(text, jsonb, jsonb, text, uuid) to authenticated;
 
 -- apply_official_correction v2: idem versione 0003 ma con temp table
 -- protetta da collisione (la funzione puo' girare piu' volte per transazione)

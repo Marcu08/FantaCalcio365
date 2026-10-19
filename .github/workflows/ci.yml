@@ -52,3 +52,74 @@ jobs:
 
       - name: Test fase 2 (cache, override, idempotenza, RLS)
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f supabase/tests/phase2_tests.sql
+
+      - name: Test RLS pronostici + spareggi classifica (FASE 3)
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f supabase/tests/rls_tests.sql
+
+  migration-on-populated:
+    name: Migration 0008 su database popolato
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Avvia stack locale
+        run: supabase start
+
+      - name: Applica migrations 0001-0007 (esclude la 0008)
+        run: |
+          for f in supabase/migrations/0001_schema.sql \
+                   supabase/migrations/0002_rls.sql \
+                   supabase/migrations/0003_scoring.sql \
+                   supabase/migrations/0004_admin.sql \
+                   supabase/migrations/0005_cron_lock.sql \
+                   supabase/migrations/0006_cron_schedule.sql \
+                   supabase/migrations/0007_group_rls_fix.sql; do
+            psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f "$f"
+          done
+
+      - name: Inserisce dati di esempio realistici
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f supabase/tests/populated_seed.sql
+
+      - name: Conteggi pre-0008
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -Atc \
+            "select 'matches='||count(*) from matches;
+             select 'players='||count(*) from players;
+             select 'predictions='||count(*) from predictions;
+             select 'scores='||count(*) from scores;
+             select 'score40='||total from scores limit 1;" > /tmp/counts_before.txt
+          cat /tmp/counts_before.txt
+
+      - name: Applica la 0008 su database popolato
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f supabase/migrations/0008_cache_and_audit.sql
+
+      - name: Conteggi post-0008 e confronto
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -Atc \
+            "select 'matches='||count(*) from matches;
+             select 'players='||count(*) from players;
+             select 'predictions='||count(*) from predictions;
+             select 'scores='||count(*) from scores;
+             select 'score40='||total from scores limit 1;" > /tmp/counts_after.txt
+          cat /tmp/counts_after.txt
+          diff /tmp/counts_before.txt /tmp/counts_after.txt
+          echo "OK: nessun dato perso, punteggi invariati dopo la 0008"
+
+  deno-functions:
+    name: Test Edge Functions (deno test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v1.45
+
+      - name: Test Edge Functions
+        run: deno test --allow-all --unstable supabase/functions/tests/

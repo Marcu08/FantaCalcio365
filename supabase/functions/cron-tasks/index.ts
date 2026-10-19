@@ -16,7 +16,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const TTL_LIVE = parseInt(Deno.env.get("CACHE_TTL_LIVE_S") ?? "30");
 const TTL_UNCONFIRMED = parseInt(Deno.env.get("CACHE_TTL_UNCONFIRMED_S") ?? "900");
 
-Deno.serve(async () => {
+export async function handler(_req: Request): Promise<Response> {
   const admin = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -117,4 +117,6 @@ Deno.serve(async () => {
   }
 
   return Response.json({ ok: true, providerDown, skipped });
-});
+}
+
+Deno.serve(handler);

@@ -108,8 +108,9 @@ supabase db query --linked "select status, count(*) from matches group by status
    e crea event_cache, colonne override e audit before/after.
    ATTENZIONE: la 0008 **sostituisce** `score_match` e `ingest_match_result` (non è
    puramente additiva). Prima del push in produzione eseguire
-   `supabase\tests\compare_old_vs_new.sql` su una giornata già chiusa e verificare
-   che punteggi v1 e v2 coincidano.
+   `supabase\tests\compare_old_vs_new.sql` (**verifica contro la formula**) su una
+   giornata già chiusa: l'output deve essere 0 righe, cioè i punteggi coincidono
+   con il regolamento applicato in forma esplicita.
 2. **Poi le Edge Functions** (le versioni precedenti di cron-tasks chiamano
    `cache_is_fresh` che non esisterebbe ancora, e non rispetterebbero `manual_override`):
 ```powershell
@@ -117,6 +118,19 @@ supabase functions deploy provider-proxy
 supabase functions deploy admin-override
 supabase functions deploy cron-tasks
 ```
+
+### Backup prima del push in produzione (obbligatorio)
+```powershell
+# 1. Dump completo (schema + dati) con timestamp
+supabase db dump --linked --file "backup_$(Get-Date -Format yyyyMMdd_HHmm).sql"
+
+# 2. Solo dati (per restore selettivo)
+supabase db dump --linked --data --file "backup_data_$(Get-Date -Format yyyyMMdd_HHmm).sql"
+
+# 3. Conservare i file fuori dal repo (già esclusi da .gitignore: dump.sql, *.dump)
+```
+In caso di rollback: `psql "<DB_URL>" -f backup_<ts>.sql` dopo aver interrotto il cron
+(Dashboard → Database → Cron → disable `fantacalcio365-cron-tasks`).
 
 ### Edge Functions
 ```powershell

@@ -38,7 +38,7 @@ const OverrideSchema = z.object({
   events: z.array(EventSchema).max(100),
 });
 
-Deno.serve(async (req) => {
+export async function handler(req: Request): Promise<Response> {
   try {
     if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
 
@@ -87,4 +87,6 @@ Deno.serve(async (req) => {
   } catch (e) {
     return Response.json({ error: String(e) }, { status: 500 });
   }
-});
+}
+
+Deno.serve(handler);
