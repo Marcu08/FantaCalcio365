@@ -49,9 +49,9 @@ insert into auth.users (id, aud, role, email, encrypted_password, email_confirme
    'cccccccc-0000-0000-0000-000000000002',2,1,0,1);
 insert into prediction_players values
   ('eeeeeeee-0000-0000-0000-000000000002','bbbbbbbb-0000-0000-0000-000000000002',true),
-  ('eeeeeeee-0000-0000-0000-000000000001',false),
-  ('eeeeeeee-0000-0000-0000-000000000003',false),
-  ('eeeeeeee-0000-0000-0000-000000000004',false);
+  ('eeeeeeee-0000-0000-0000-000000000002','bbbbbbbb-0000-0000-0000-000000000001',false),
+  ('eeeeeeee-0000-0000-0000-000000000002','bbbbbbbb-0000-0000-0000-000000000003',false),
+  ('eeeeeeee-0000-0000-0000-000000000002','bbbbbbbb-0000-0000-0000-000000000004',false);
 
 -- =============================================================
 -- TEST 1: NO insert pronostico su partita bloccata (via API diretta)

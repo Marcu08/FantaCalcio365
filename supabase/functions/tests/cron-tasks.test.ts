@@ -4,16 +4,12 @@
 // non interroga le partite CONFIRMED, gestisce provider offline.
 // =============================================================
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { mock } from "jsr:@std/mock@1";
+import { setMockFactory, resetMockFactory } from "./supabase_mock.ts";
 import { importIndex } from "./mocks.ts";
 
 type RpcCall = { name: string; args: any };
 
-function makeMockClient(opts: {
-  matches: any[];
-  fresh?: boolean;          // risposta di cache_is_fresh
-}) {
+function makeMockClient(opts: { matches: any[]; fresh?: boolean }) {
   const rpcCalls: RpcCall[] = [];
   const selectCalls: any[] = [];
   const client = {
@@ -22,18 +18,18 @@ function makeMockClient(opts: {
       return { data: name === "cache_is_fresh" ? (opts.fresh ?? false) : null, error: null };
     },
     from: (_t: string) => {
+      const selectCallsLocal = selectCalls;
       const chain: any = {
-        select: (..._a: any[]) => { selectCalls.push({ select: true }); return chain; },
-        in: (col: string, vals: string[]) => { selectCalls.push({ in: [col, vals] }); return chain; },
-        eq: (col: string, val: any) => { selectCalls.push({ eq: [col, val] }); return chain; },
+        select: (..._a: any[]) => { selectCallsLocal.push({ select: true }); return chain; },
+        in: (col: string, vals: string[]) => { selectCallsLocal.push({ in: [col, vals] }); return chain; },
+        eq: (col: string, val: any) => { selectCallsLocal.push({ eq: [col, val] }); return chain; },
       };
-      // il chain restituisce i dati quando usato come await finale
       (chain as any).then = (res: any, rej: any) =>
         Promise.resolve({ data: opts.matches, error: null }).then(res, rej);
       return chain;
     },
   };
-  return { client, rpcCalls, selectCalls };
+  return { rpcCalls, selectCalls };
 }
 
 const MATCH_LIVE = { id: "m-live", provider_id: "PLIVE", status: "LIVE", manual_override: false };
@@ -48,11 +44,9 @@ const FIXTURE_OK = {
   }],
 };
 
-function makeHandler(opts: { matches: any[]; fresh?: boolean }) {
+function setup(opts: { matches: any[]; fresh?: boolean }) {
   const mc = makeMockClient({ matches: opts.matches, fresh: opts.fresh });
-  const undo = mock.module("https://esm.sh/@supabase/supabase-js@2", () => ({
-    createClient: () => mc.client,
-  }));
+  setMockFactory(() => mc.client);
   const fetchCalls: string[] = [];
   const origFetch = globalThis.fetch;
   globalThis.fetch = (input: any, init?: any) => {
@@ -65,34 +59,27 @@ function makeHandler(opts: { matches: any[]; fresh?: boolean }) {
   };
   return {
     rpcCalls: mc.rpcCalls, selectCalls: mc.selectCalls, fetchCalls,
-    cleanup: () => {
-      globalThis.fetch = origFetch;
-      if (typeof undo === "function") undo(); else undo?.restore?.();
-    },
+    cleanup: () => { globalThis.fetch = origFetch; resetMockFactory(); },
   };
 }
 
 Deno.test("cron: salta partite con manual_override e non interroga CONFIRMED", async () => {
-  const h = makeHandler({ matches: [MATCH_LIVE, MATCH_OVR], fresh: false });
+  const h = setup({ matches: [MATCH_LIVE, MATCH_OVR], fresh: false });
   const mod = await importIndex("../cron-tasks/index.ts");
-  const res = await mod.handler(new Request("http://x/cron"));
-  await res.json();
-  // la select deve includere .in(status, LIVE/FINISHED) e .eq(manual_override, false)
-  const hasIn = h.selectCalls.some((c) => c.in?.[0] === "status" && c.in?.[1].join() === "LIVE,FINISHED");
-  const hasOvr = h.selectCalls.some((c) => c.eq?.[0] === "manual_override" && c.eq?.[1] === false);
+  await mod.handler(new Request("http://x/cron")).json();
+  const hasIn = h.selectCalls.some((c: any) => c.in?.[0] === "status" && c.in?.[1].join() === "LIVE,FINISHED");
+  const hasOvr = h.selectCalls.some((c: any) => c.eq?.[0] === "manual_override" && c.eq?.[1] === false);
   assertEquals(hasIn, true, "deve interrogare solo LIVE/FINISHED");
   assertEquals(hasOvr, true, "deve escludere manual_override = true");
-  // nessuna fetch per POVR
   assertEquals(h.fetchCalls.some((u) => String(u).includes("POVR")), false,
     "il provider NON deve essere interrogato per partite override");
   h.cleanup();
 });
 
 Deno.test("cron: TTL - cache fresh = skip provider", async () => {
-  const h = makeHandler({ matches: [MATCH_LIVE], fresh: true });
+  const h = setup({ matches: [MATCH_LIVE], fresh: true });
   const mod = await importIndex("../cron-tasks/index.ts");
-  const res = await mod.handler(new Request("http://x/cron"));
-  const body = await res.json();
+  const body = await mod.handler(new Request("http://x/cron")).json();
   assertEquals(body.skipped, 1, "cache fresh: partita saltata");
   assertEquals(h.fetchCalls.some((u) => u.includes("football")), false,
     "provider NON interrogato con cache fresh");
@@ -100,12 +87,12 @@ Deno.test("cron: TTL - cache fresh = skip provider", async () => {
 });
 
 Deno.test("cron: cache scaduta - chiama provider, scrive cache e ingesta", async () => {
-  const h = makeHandler({ matches: [MATCH_FIN], fresh: false });
+  const h = setup({ matches: [MATCH_FIN], fresh: false });
   const mod = await importIndex("../cron-tasks/index.ts");
   await mod.handler(new Request("http://x/cron")).json();
   assertEquals(h.fetchCalls.some((u) => u.includes("PFIN")), true, "provider interrogato");
-  assertEquals(h.rpcCalls.some((r) => r.name === "cache_match_events"), true, "cache scritta");
-  const ingest = h.rpcCalls.find((r) => r.name === "ingest_match_result");
+  assertEquals(h.rpcCalls.some((r: any) => r.name === "cache_match_events"), true, "cache scritta");
+  const ingest = h.rpcCalls.find((r: any) => r.name === "ingest_match_result");
   assertEquals(ingest != null, true, "ingest_match_result chiamata");
   if (ingest != null) {
     // §4: il 2T e' la differenza ft - ht (solo gol seconda frazione)
@@ -117,11 +104,11 @@ Deno.test("cron: cache scaduta - chiama provider, scrive cache e ingesta", async
 });
 
 Deno.test("cron: mai interroga CONFIRMED (solo LIVE/FINISHED)", async () => {
-  const h = makeHandler({ matches: [] });
+  const h = setup({ matches: [] });
   const mod = await importIndex("../cron-tasks/index.ts");
   await mod.handler(new Request("http://x/cron")).json();
-  const inCall = h.selectCalls.find((c) => c.in?.[0] === "status");
-  assertEquals(inCall.in[1].includes("CONFIRMED"), false,
+  const inCall = h.selectCalls.find((c: any) => c.in?.[0] === "status");
+  assertEquals(inCall?.in?.[1]?.includes("CONFIRMED"), false,
     "CONFIRMED non deve mai essere richiesto al provider dal cron");
   h.cleanup();
 });

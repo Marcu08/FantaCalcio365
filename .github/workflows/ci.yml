@@ -113,4 +113,4 @@ jobs:
           deno-version: v2.0.0
 
       - name: Test Edge Functions
-        run: deno test --allow-all --unstable supabase/functions/tests/
+        run: deno test --allow-all --import-map supabase/functions/tests/import_map.json supabase/functions/tests/
