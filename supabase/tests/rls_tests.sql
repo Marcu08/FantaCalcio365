@@ -158,7 +158,7 @@ begin
   begin
     update leaderboard set total = 1;
     raise exception 'FAIL: leaderboard modificata!';
-  exception when insufficient_privilege or raise_exception then
+  exception when feature_not_supported or insufficient_privilege or raise_exception then
     raise notice 'PASS: leaderboard NON modificabile (vista read-only)';
   end;
 end $$;

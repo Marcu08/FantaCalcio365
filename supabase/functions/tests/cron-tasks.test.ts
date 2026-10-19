@@ -66,7 +66,8 @@ function setup(opts: { matches: any[]; fresh?: boolean }) {
 Deno.test("cron: salta partite con manual_override e non interroga CONFIRMED", async () => {
   const h = setup({ matches: [MATCH_LIVE, MATCH_OVR], fresh: false });
   const mod = await importIndex("../cron-tasks/index.ts");
-  await mod.handler(new Request("http://x/cron")).json();
+  const res = await mod.handler(new Request("http://x/cron"));
+  await res.json();
   const hasIn = h.selectCalls.some((c: any) => c.in?.[0] === "status" && c.in?.[1].join() === "LIVE,FINISHED");
   const hasOvr = h.selectCalls.some((c: any) => c.eq?.[0] === "manual_override" && c.eq?.[1] === false);
   assertEquals(hasIn, true, "deve interrogare solo LIVE/FINISHED");
@@ -79,7 +80,7 @@ Deno.test("cron: salta partite con manual_override e non interroga CONFIRMED", a
 Deno.test("cron: TTL - cache fresh = skip provider", async () => {
   const h = setup({ matches: [MATCH_LIVE], fresh: true });
   const mod = await importIndex("../cron-tasks/index.ts");
-  const body = await mod.handler(new Request("http://x/cron")).json();
+  const body = await mod.handler(new Request("http://x/cron")).then((r: Response) => r.json());
   assertEquals(body.skipped, 1, "cache fresh: partita saltata");
   assertEquals(h.fetchCalls.some((u) => u.includes("football")), false,
     "provider NON interrogato con cache fresh");
@@ -89,7 +90,8 @@ Deno.test("cron: TTL - cache fresh = skip provider", async () => {
 Deno.test("cron: cache scaduta - chiama provider, scrive cache e ingesta", async () => {
   const h = setup({ matches: [MATCH_FIN], fresh: false });
   const mod = await importIndex("../cron-tasks/index.ts");
-  await mod.handler(new Request("http://x/cron")).json();
+  const res = await mod.handler(new Request("http://x/cron"));
+  await res.json();
   assertEquals(h.fetchCalls.some((u) => u.includes("PFIN")), true, "provider interrogato");
   assertEquals(h.rpcCalls.some((r: any) => r.name === "cache_match_events"), true, "cache scritta");
   const ingest = h.rpcCalls.find((r: any) => r.name === "ingest_match_result");
@@ -106,7 +108,8 @@ Deno.test("cron: cache scaduta - chiama provider, scrive cache e ingesta", async
 Deno.test("cron: mai interroga CONFIRMED (solo LIVE/FINISHED)", async () => {
   const h = setup({ matches: [] });
   const mod = await importIndex("../cron-tasks/index.ts");
-  await mod.handler(new Request("http://x/cron")).json();
+  const res = await mod.handler(new Request("http://x/cron"));
+  await res.json();
   const inCall = h.selectCalls.find((c: any) => c.in?.[0] === "status");
   assertEquals(inCall?.in?.[1]?.includes("CONFIRMED"), false,
     "CONFIRMED non deve mai essere richiesto al provider dal cron");
