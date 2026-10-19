@@ -431,9 +431,7 @@ select pg_temp.assert_eq((select coalesce(max(goals),0) from player_match_stats
 -- TEST 11: ingest vs override — stessi eventi = stesse stats/punteggi
 -- =============================================================
 insert into matches (id, season_id, matchday, provider_id, home_team_id, away_team_id,
-                     kickoff_at, status, locked_at,
-                     ht_home_goals, ht_away_goals, ht2_home_goals, ht2_away_goals,
-                     ft_home_goals, ft_away_goals)
+                     kickoff_at, status, locked_at)
 values
   ('cccccccc-0000-0000-0000-000000000005','11111111-1111-1111-1111-111111111111',5,'M7',
    'aaaaaaaa-0000-0000-0000-000000000001','aaaaaaaa-0000-0000-0000-000000000002',
