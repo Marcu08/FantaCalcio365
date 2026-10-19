@@ -68,7 +68,7 @@ insert into prediction_players values
 -- =============================================================
 -- TEST 1: ricalcolo base + idempotenza
 -- =============================================================
-perform public.score_match('cccccccc-0000-0000-0000-000000000001');
+select public.score_match('cccccccc-0000-0000-0000-000000000001');
 
 -- Pronostico: 1T 1-0 esatto, 2T 0-1 esatto → combo 20 + bonus gol P2 (10) = 30
 select pg_temp.assert_eq((select total from scores where user_id='dddddddd-0000-0000-0000-000000000001'),
@@ -83,7 +83,7 @@ create temp table t_sum1 as
   select coalesce(sum(total),0) as s, count(*) as n from scores where match_id = 'cccccccc-0000-0000-0000-000000000001';
 
 -- SECONDO ricalcolo (idempotenza)
-perform public.score_match('cccccccc-0000-0000-0000-000000000001');
+select public.score_match('cccccccc-0000-0000-0000-000000000001');
 
 select pg_temp.assert_eq((select sum(total) from scores where match_id='cccccccc-0000-0000-0000-000000000001'),
                  (select s from t_sum1), 'Idempotenza: somme identiche');
@@ -99,7 +99,7 @@ select pg_temp.assert_eq((select count(*)::int from admin_audit_log where action
 select set_config('role', 'postgres', true);
 select set_config('request.jwt.claims',
   '{"sub":"dddddddd-0000-0000-0000-000000000002","role":"authenticated"}', true);
-perform public.admin_override_match(
+select public.admin_override_match(
   'M1',
   '{"status":"CONFIRMED","ht_home":2,"ht_away":0,"ht2_home":1,"ht2_away":1,"ft_home":3,"ft_away":1}',
   '[{"event_order":1,"minute":10,"type":"GOAL","player":"P2"},
@@ -126,7 +126,7 @@ select pg_temp.assert_eq((select count(*)::int from admin_audit_log where action
                  1::int, 'Audit ADMIN_OVERRIDE con before/after');
 
 -- Cron non sovrascrive: ingest_match_result su partita con manual_override = no-op
-perform public.ingest_match_result('M1', '{"status":"CONFIRMED","ht_home":9,"ht_away":9,"ht2_home":9,"ht2_away":9,"ft_home":9,"ft_away":9,"events":[]}');
+select public.ingest_match_result('M1', '{"status":"CONFIRMED","ht_home":9,"ht_away":9,"ht2_home":9,"ht2_away":9,"ft_home":9,"ft_away":9,"events":[]}');
 select pg_temp.assert_eq((select ft_home_goals from matches where id='cccccccc-0000-0000-0000-000000000001'),
                  3::int, 'Cron NON sovrascrive partita con manual_override');
 
@@ -253,7 +253,7 @@ insert into prediction_players values
   ('eeeeeeee-0000-0000-0000-000000000002','bbbbbbbb-0000-0000-0000-000000000003',false),
   ('eeeeeeee-0000-0000-0000-000000000002','bbbbbbbb-0000-0000-0000-000000000004',false);
 
-perform public.score_match('cccccccc-0000-0000-0000-000000000002');
+select public.score_match('cccccccc-0000-0000-0000-000000000002');
 
 -- Il combo 0-0 esatto vale comunque 20; ciò che DEVE essere 0 e' il bonus marcatore:
 -- P5 dichiarato ma senza statistiche (mai entrato) non contribuisce
@@ -290,7 +290,7 @@ insert into prediction_players values
   ('eeeeeeee-0000-0000-0000-000000000003','bbbbbbbb-0000-0000-0000-000000000004',true);
 
 -- La gara si disputa e viene inserita dal cron
-perform public.ingest_match_result('M3', '{"status":"FINISHED","ht_home":1,"ht_away":0,"ht2_home":0,"ht2_away":1,"ft_home":1,"ft_away":1,"events":[{"event_order":1,"minute":20,"type":"GOAL","player":"P2"},{"event_order":2,"minute":80,"type":"GOAL","player":"P4"}]}');
+select public.ingest_match_result('M3', '{"status":"FINISHED","ht_home":1,"ht_away":0,"ht2_home":0,"ht2_away":1,"ft_home":1,"ft_away":1,"events":[{"event_order":1,"minute":20,"type":"GOAL","player":"P2"},{"event_order":2,"minute":80,"type":"GOAL","player":"P4"}]}');
 
 -- Combo esatto 20. I bonus gol (P2, P4) valgono 0 qui: su una partita di test
 -- senza bonus congelati dal modello, gol_bonus_pts di default e' 0.

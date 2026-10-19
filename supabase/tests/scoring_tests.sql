@@ -89,7 +89,7 @@ insert into prediction_players values
   ('eeeeeeee-0000-0000-0000-000000000002','bbbbbbbb-0000-0000-0000-000000000002',true);
 -- NB: utente2 ha P2 (DF Casa) selezionato ma la squadra HA subìto 1 gol -> no clean sheet
 
-perform public.score_match('cccccccc-0000-0000-0000-000000000001');
+select public.score_match('cccccccc-0000-0000-0000-000000000001');
 
 -- TEST 1: combo perfetto = 20 base
 select pg_temp.assert_eq((select pts_ht + pts_ht2 from scores
