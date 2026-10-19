@@ -25,7 +25,9 @@ insert into teams (id, provider_id, name, short_name) values
   ('aaaaaaaa-0000-0000-0000-000000000002','T2','Ospite','OSP');
 insert into players (id, team_id, provider_id, name, position) values
   ('bbbbbbbb-0000-0000-0000-000000000001','aaaaaaaa-0000-0000-0000-000000000001','P1','FW Casa','FW'),
-  ('bbbbbbbb-0000-0000-0000-000000000002','aaaaaaaa-0000-0000-0000-000000000002','P2','FW Ospite','FW');
+  ('bbbbbbbb-0000-0000-0000-000000000002','aaaaaaaa-0000-0000-0000-000000000002','P2','FW Ospite','FW'),
+  ('bbbbbbbb-0000-0000-0000-000000000003','aaaaaaaa-0000-0000-0000-000000000001','P3','GK Casa','GK'),
+  ('bbbbbbbb-0000-0000-0000-000000000004','aaaaaaaa-0000-0000-0000-000000000002','P4','GK Ospite','GK');
 
 -- Partita A: BLOCCATA (locked_at gia' passato)
 -- Partita B: APERA (locked_at null, kickoff futura)

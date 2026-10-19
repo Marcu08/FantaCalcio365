@@ -29,7 +29,7 @@ function makeMockClient(opts: { matches: any[]; fresh?: boolean }) {
       return chain;
     },
   };
-  return { rpcCalls, selectCalls };
+  return { client, rpcCalls, selectCalls };
 }
 
 const MATCH_LIVE = { id: "m-live", provider_id: "PLIVE", status: "LIVE", manual_override: false };

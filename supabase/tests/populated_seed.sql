@@ -5,6 +5,7 @@
 -- coincidere (nessun dato perso).
 -- =============================================================
 insert into seasons (id, name) values ('11111111-1111-1111-1111-111111111111', 'Populated Season');
+begin;
 insert into teams (id, provider_id, name, short_name) values
   ('aaaaaaaa-0000-0000-0000-000000000001','T1','Casa','CAS'),
   ('aaaaaaaa-0000-0000-0000-000000000002','T2','Ospite','OSP');
@@ -51,3 +52,4 @@ insert into scores (user_id, match_id, season_id, matchday, pts_ht, pts_ht2, pts
   ('dddddddd-0000-0000-0000-000000000001','cccccccc-0000-0000-0000-000000000001',
    '11111111-1111-1111-1111-111111111111',1, 4, 16, 20.0, 0, 0, 0, 40.0,
    true, true, 2, now(), false, false);
+commit;
