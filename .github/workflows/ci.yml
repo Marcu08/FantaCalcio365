@@ -39,7 +39,9 @@ jobs:
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.121.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Start local stack (Docker incluso nel runner)
         run: supabase start
@@ -65,7 +67,9 @@ jobs:
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.121.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Esclude temporaneamente la 0008 (simula DB pre-FASE 2)
         run: mv supabase/migrations/0008_cache_and_audit.sql /tmp/0008.sql

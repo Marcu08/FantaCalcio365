@@ -44,7 +44,8 @@ insert into auth.users (id, aud, role, email, encrypted_password, email_confirme
   ('dddddddd-0000-0000-0000-000000000001','authenticated','authenticated','r1@test.local','x',now(),now(),now(),'{"username":"rls1"}'),
   ('dddddddd-0000-0000-0000-000000000002','authenticated','authenticated','r2@test.local','x',now(),now(),now(),'{"username":"rls2"}');
 
--- user2 ha un pronostico sulla partita APERTA (user1 non deve vederlo)insert into predictions (id, user_id, match_id, ht_home, ht_away, ht2_home, ht2_away) values
+-- user2 ha un pronostico sulla partita APERTA (user1 non deve vederlo)
+insert into predictions (id, user_id, match_id, ht_home, ht_away, ht2_home, ht2_away) values
   ('eeeeeeee-0000-0000-0000-000000000002','dddddddd-0000-0000-0000-000000000002',
    'cccccccc-0000-0000-0000-000000000002',2,1,0,1);
 insert into prediction_players values
