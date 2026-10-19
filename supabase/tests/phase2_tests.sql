@@ -312,7 +312,7 @@ begin
   perform set_config('request.jwt.claims',
     '{"sub":"dddddddd-0000-0000-0000-000000000001","role":"authenticated"}', true);
   select count(*) into v_visible from admin_audit_log;
-  select pg_temp.assert_eq(v_visible, 0::int,
+  perform pg_temp.assert_eq(v_visible, 0::int,
     'Utente normale: zero righe di admin_audit_log (RLS is_admin)');
 end $$;
 
