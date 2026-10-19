@@ -19,13 +19,26 @@ function makeMockClient(opts: { matches: any[]; fresh?: boolean }) {
     },
     from: (_t: string) => {
       const selectCallsLocal = selectCalls;
+      const conds: Array<(m: any) => boolean> = [];
       const chain: any = {
         select: (..._a: any[]) => { selectCallsLocal.push({ select: true }); return chain; },
-        in: (col: string, vals: string[]) => { selectCallsLocal.push({ in: [col, vals] }); return chain; },
-        eq: (col: string, val: any) => { selectCallsLocal.push({ eq: [col, val] }); return chain; },
+        in: (col: string, vals: string[]) => {
+          selectCallsLocal.push({ in: [col, vals] });
+          conds.push((m: any) => vals.includes(m[col]));
+          return chain;
+        },
+        eq: (col: string, val: any) => {
+          selectCallsLocal.push({ eq: [col, val] });
+          conds.push((m: any) => m[col] === val);
+          return chain;
+        },
       };
+      // applicare i filtri quando la catena viene attesa
       (chain as any).then = (res: any, rej: any) =>
-        Promise.resolve({ data: opts.matches, error: null }).then(res, rej);
+        Promise.resolve({
+          data: opts.matches.filter((m: any) => conds.every((c) => c(m))),
+          error: null,
+        }).then(res, rej);
       return chain;
     },
   };
