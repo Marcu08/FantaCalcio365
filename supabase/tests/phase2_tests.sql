@@ -131,7 +131,7 @@ select pg_temp.assert_eq((select ft_home_goals from matches where id='cccccccc-0
                  3::int, 'Cron NON sovrascrive partita con manual_override');
 
 -- =============================================================
--- TEST 3: non-admin non puo' fare override
+-- TEST 3: non-admin non puo'' fare override
 -- =============================================================
 do $$
 declare
@@ -158,7 +158,7 @@ begin
   perform set_config('role', 'authenticated', true);
   begin
     perform public.cache_match_events('X','cccccccc-0000-0000-0000-000000000001','{}','[]','ok',null);
-    raise exception 'TEST FALLITO: authenticated puo' scrivere event_cache';
+    raise exception 'TEST FALLITO: authenticated puo'' scrivere event_cache';
   exception when insufficient_privilege then
     raise notice 'PASS: cache_match_events negata a authenticated';
   end;
