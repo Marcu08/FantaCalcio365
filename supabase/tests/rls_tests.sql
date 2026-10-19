@@ -237,4 +237,76 @@ where a.total = b.total
 select pg_temp.assert_eq((select count(*)::int from t_tie), 0::int,
   'Parita'' totale (anche orario): nessun criterio li separa, posto condiviso');
 
+-- =============================================================
+-- TEST 6 (FASE 4): GAP 1 chiuso — NO aggiunta giocatori a schedina
+--                   bloccata via API diretta
+-- =============================================================
+do $$
+declare
+  v_before int;
+begin
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    '{"sub":"dddddddd-0000-0000-0000-000000000002","role":"authenticated"}', true);
+  select count(*) into v_before from prediction_players
+  where prediction_id = 'eeeeeeee-0000-0000-0000-000000000002';
+  begin
+    -- aggiungo un giocatore alla schedina di user2, ora su partita BLOCCATA
+    insert into prediction_players values
+      ('eeeeeeee-0000-0000-0000-000000000002','bbbbbbbb-0000-0000-0000-000000000004',true);
+    raise exception 'FAIL: aggiunta giocatori a schedina bloccata accettata';
+  exception when insufficient_privilege then
+    null; -- atteso: with-check ora verifica il blocco
+  end;
+  perform pg_temp.assert_eq((select count(*)::int from prediction_players
+                     where prediction_id = 'eeeeeeee-0000-0000-0000-000000000002'),
+                    v_before::int, 'GAP 1 chiuso: prediction_players immutabili post-blocco');
+end $$;
+
+select set_config('role', 'postgres', true);
+
+-- =============================================================
+-- TEST 7 (FASE 4): GAP 2 chiuso — NO spostamento schedina bloccata
+--                   su partita aperta
+-- =============================================================
+do $$
+begin
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    '{"sub":"dddddddd-0000-0000-0000-000000000002","role":"authenticated"}', true);
+  begin
+    -- la schedina di user2 e' su partita BLOCCATA (RA); provo a spostarla
+    -- sulla partita APERTA (RB)
+    update predictions set match_id = 'cccccccc-0000-0000-0000-000000000002'
+    where id = 'eeeeeeee-0000-0000-0000-000000000002';
+    raise exception 'FAIL: spostamento schedina bloccata accettato';
+  exception when insufficient_privilege then
+    null; -- atteso: using verifica anche la riga vecchia
+  end;
+end $$;
+
+select set_config('role', 'postgres', true);
+select pg_temp.assert_eq(
+  (select count(*)::int from predictions
+   where id = 'eeeeeeee-0000-0000-0000-000000000002'
+     and match_id = 'cccccccc-0000-0000-0000-000000000001'),
+  1::int, 'GAP 2 chiuso: schedina bloccata non spostabile');
+
+-- TEST 8-bis: la LETTURA della propria schedina bloccata resta possibile
+-- (l'app deve mostrare la schedina compilata anche dopo il blocco)
+do $$
+declare
+  v int;
+begin
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    '{"sub":"dddddddd-0000-0000-0000-000000000002","role":"authenticated"}', true);
+  select count(*) into v from prediction_players
+  where prediction_id = 'eeeeeeee-0000-0000-0000-000000000002';
+  perform pg_temp.assert_eq(v, 4::int,
+    'Lettura propria schedina bloccata: ancora possibile');
+end $$;
+
+select set_config('role', 'postgres', true);
+
 rollback;
