@@ -108,12 +108,14 @@ begin
   select coalesce(sum(total), 0), count(*) into v_sum_old, v_changed
   from scores where match_id = p_match_id;
 
+  -- la funzione puo' girare piu' volte nella stessa transazione (override +
+  -- ricalcoli): la temp table va ricreata senza collisione
+  drop table if exists tmp_pred;
   create temp table tmp_pred on commit drop as
     select pr.*, pr2.player_id, pr2.is_marked_scorer
     from predictions pr
     join prediction_players pr2 on pr2.prediction_id = pr.id
     where pr.match_id = p_match_id;
-
   insert into scores (user_id, match_id, season_id, matchday,
                       pts_ht, pts_ht2, pts_scorers, pts_clean_sheet,
                       pts_sub, pts_yellow, total, exact_ht, exact_ht2,
@@ -160,7 +162,8 @@ begin
     m.status = 'CONFIRMED'
   from tmp_pred p
   where p.match_id = p_match_id
-  group by p.id, p.user_id, p.match_id
+  group by p.id, p.user_id, p.match_id, p.ht_home, p.ht_away, p.ht2_home, p.ht2_away,
+           p.first_sub_out_player_id, p.first_yellow_player_id, p.submitted_at
   on conflict (user_id, match_id) do update set
     pts_ht = excluded.pts_ht,
     pts_ht2 = excluded.pts_ht2,
@@ -318,6 +321,39 @@ end $$;
 revoke all on function public.admin_override_match(text, jsonb, jsonb, text, uuid)
   from public, anon, authenticated;
 grant execute on function public.admin_override_match(text, jsonb, jsonb, text, uuid) to service_role;
+
+-- apply_official_correction v2: idem versione 0003 ma con temp table
+-- protetta da collisione (la funzione puo' girare piu' volte per transazione)
+create or replace function public.apply_official_correction(
+  p_match_id uuid, p_reason text, p_source_event uuid default null
+) returns void
+language plpgsql security definer
+set search_path = public, pg_temp as $$
+declare
+  v_old_sum numeric;
+  v_new_sum numeric;
+begin
+  select coalesce(sum(total), 0) into v_old_sum from scores where match_id = p_match_id;
+
+  -- snapshot per il log dei delta utente-per-utente
+  drop table if exists tmp_old_scores;
+  create temp table tmp_old_scores as
+    select user_id, total from scores where match_id = p_match_id;
+
+  perform public.score_match(p_match_id);
+
+  select coalesce(sum(total), 0) into v_new_sum from scores where match_id = p_match_id;
+
+  -- score_match scrive gia' l'audit SCORE_RECALC quando qualcosa cambia;
+  -- qui si registra solo la correzione admin se effettivamente ci fu un delta
+  if v_new_sum is distinct from v_old_sum then
+    insert into score_corrections (match_id, user_id, old_total, new_total, reason, source_event_id)
+    select p_match_id, o.user_id, o.total, s.total, p_reason, p_source_event
+    from tmp_old_scores o join scores s
+      on s.user_id = o.user_id
+    where s.match_id = p_match_id and o.total <> s.total;
+  end if;
+end $$;
 
 -- ingest_match_result v2: lock di riga + salto manual_override
 create or replace function public.ingest_match_result(
