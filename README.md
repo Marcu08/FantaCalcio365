@@ -1,43 +1,133 @@
 # FantaCalcio365
 
-App Android nativa (Kotlin + Jetpack Compose) per pronostici gratuiti sulla Serie A.
-Nessuna puntata, nessun premio in denaro: solo punti e classifica stagionale cumulativa.
+App Android nativa per pronostici gratuiti sulla Serie A italiana. Nessuna puntata,
+nessun premio in denaro: solo punti, classifica generale cumulativa e gruppi privati
+con gli amici.
 
-## Regolamento (approvato)
+Backend Supabase (PostgreSQL + RLS + Edge Functions), provider dati API-Football,
+client Android in Kotlin con Jetpack Compose (MVVM). Tutta la logica di punteggio,
+validazione e blocco dei pronostici vive **sul server**: l'app non calcola nulla.
 
-- **Risultati per tempo (modalità combinata prevale):**
-  - 1T esatto + 2T esatto = 4 + 6 + 10 bonus = **20 punti**
-  - Solo 2T esatto = **6 punti**
-  - Solo 1T esatto = **0 punti** (vale solo nel combo — decisione A1)
-  - Nessun punto per il solo segno; nessuna regola speciale per 1T 0-0
-- **Quattro giocatori** per partita: almeno 1 di casa, almeno 1 ospite, **almeno 1 dichiarato marcatore**.
-  Ogni rete di un marcatore dichiarato vale il **bonus gol dinamico 5–15 punti** (moltiplicato per le reti).
-  Giocatore selezionato non dichiarato = 0 punti anche se segna. Non entrato in campo = 0 punti.
-- **Porta inviolata** (somma al bonus gol): GK/DF scesi in campo, 0 gol subiti. Valore del modello congelato; tetto **10 punti solo per i portieri**.
-- **Primo sostituto** (chi esce) = 2 punti. **Primo ammonito** (in campo) = 2 punti. Parità risolta con l'ordinamento evento del provider.
-- **Blocco pronostici** all'inizio della prima gara della giornata, verificato dal server. Mai riaperture; le gare rinviate post-blocco conservano i pronostici.
-- **Classifica generale cumulativa** con spareggi: risultati esatti → marcatori esatti → orario di compilazione.
+## Come si guadagnano i punti
 
-## Struttura
+Prevedi il risultato del **primo tempo** e i **soli gol del secondo tempo**.
+Se entrambi sono esatti: 4 + 6 + 10 bonus = **20 punti**. Solo 2T esatto = 6 punti.
+Scegli **4 giocatori** (almeno 1 di casa, 1 ospite) e dichiara chi segna: ogni rete
+di un marcatore dichiarato vale **5-15 punti** moltiplicati per le reti.
+Portieri e difensori prendono un bonus se la loro squadra non subisce gol
+(fino a 10 punti per i portieri). Indovina **primo sostituto** o **primo ammonito**: 2 punti ciascuno.
+
+**Esempi:**
+- Pronostichi 1T 1-0 e 2T 1-1, escono così → **20 punti**
+- 1T esatto (1-0) ma 2T sbagliato → **0 punti** (il 1T da solo non vale)
+- Dichiaro Osimhen marcatore (+10), segna doppietta → **20 punti**
+
+## Stato di avanzamento
+
+### ✅ Funziona
+- Autenticazione (registrazione/accesso con email), profili automatici
+- Calendario Serie A con giornate, risultati provvisori/ufficiali distinti
+- Compilazione schedina: risultati per tempo, 4 giocatori (≥1 casa, ≥1 ospite,
+  ≥1 marcatore), primo sostituto, primo ammonito, bonus visibili prima del blocco
+- Motore di scoring server-side in PL/pgSQL con test SQL
+- RLS completa: pronostici privati fino al blocco, punteggi immutabili dal client
+- Blocco automatico delle giornate via cron (pg_cron → Edge Function, ogni minuto)
+- Sync risultati/eventi dal provider con anti-duplicazione eventi
+- Classifica generale cumulativa con spareggi; gruppi privati con codice invito
+- UI Compose: home con countdown, calendario, schedina, classifica con podio, gruppi
+
+### 🔧 Da fare (prossime fasi)
+- Cache degli eventi nel database per non consumare quota del provider a ogni sync
+- Correzioni manuali da admin con audit trail completo
+- CI su GitHub Actions (build + test Kotlin + test SQL)
+- Test RLS automatizzati (violazioni pronostici altrui, modifiche post-blocco)
+- Modello statistico reale per i bonus (oggi: valori semplificati per ruolo congelati al seed)
+- Statistiche individuali reali (minuti giocati, gol subiti dal portiere) dal provider
+
+### 🔬 POC da verificare
+- Affidabilità dell'ordinamento degli **eventi simultanei** (doppio giallo stesso minuto)
+  su API-Football: oggi usiamo `event_order` del provider, da validare su partite vere
+- Disponibilità e orario delle **formazioni ufficiali** rispetto al blocco delle schedine
+
+## Architettura
 
 ```
-app/                      App Android (Kotlin, Compose, MVVM)
+┌─ App Android (Kotlin, Compose, MVVM, Hilt-less)
+│    └─ Supabase Kotlin SDK (auth + postgrest) — solo chiave anonima, RLS attiva
+├─ Supabase
+│    ├─ Auth (email/password) + profili automatici via trigger
+│    ├─ PostgreSQL: schema, RLS, scoring engine (PL/pgSQL), pg_cron
+│    └─ Edge Functions (Deno):
+│         provider-proxy — accesso all'API calcistica (chiave solo qui)
+│         cron-tasks     — blocco giornate + sync risultati/eventi (ogni minuto)
+│         seed-league    — ingestione squadre/rose/calendario (protetta da SEED_SECRET)
+└─ API-Football v3 (serie A = league 135)
+```
+
+Nota test: il piano gratuito di API-Football copre solo 2022-2024. Il database è
+seminato con la stagione 2023/24 reale; le giornate 9+ hanno date spostate di ~3 anni
+per renderle pronosticabili in demo (artefatto dichiarato, da rimuovere con il piano a pagamento).
+
+## Struttura del repository
+
+```
+app/                          App Android (Kotlin, Compose, MVVM)
+  src/main/java/.../data/     Modelli, client Supabase, repository
+  src/main/java/.../ui/       ViewModel + schermate Compose (italiano)
+  src/test/java/...           Test regole client-side (schedina, spareggi)
 supabase/
-  migrations/             Schema SQL + RLS + motore di scoring (PL/pgSQL)
-  functions/              Edge Functions: proxy provider + cron (blocco/sync)
-  tests/                  Suite di test SQL del motore di scoring
+  migrations/                 0001 schema · 0002 RLS · 0003 scoring ·
+                              0004 admin · 0005 cron lock · 0006 schedule ·
+                              0007 fix RLS gruppi
+  functions/                  Edge Functions (Deno/TypeScript)
+  tests/scoring_tests.sql     Suite di test del motore di punteggio
 ```
 
-## Setup
+## Setup e comandi
 
-1. Progetto Supabase + applicare le migrations (`supabase db push` o SQL editor).
-2. Segreti Edge Functions: `API_FOOTBALL_KEY` (mai nell'app).
-3. `gradle.properties`: compilare `supabase.url` e `supabase.anonKey`.
-4. Build: `./gradlew assembleDebug` · Test: `./gradlew test` · Test SQL: `psql -f supabase/tests/scoring_tests.sql`.
+### Build e test app
+```powershell
+# Credenziali: crea C:\Users\<tuonome>\.gradle\gradle.properties con
+#   supabase.url=https://YOUR-PROJECT.supabase.co
+#   supabase.anonKey=YOUR-ANON-KEY
 
-## Provider calcistico
+.\gradlew.bat assembleDebug        # APK: app\build\outputs\apk\debug\
+.\gradlew.bat test                 # test regole client-side
+.\gradlew.bat installDebug         # su dispositivo adb collegato
+```
 
-Scelto **API-Football (api-sports.io)** per copertura Serie A completa (eventi minutati,
-formazioni, sostituzioni, cartellini), eventi ordinati e costi contenuti (piano gratuito
-per lo sviluppo, ~29 USD/mese in produzione). POC da fare per verificare l'affidabilità
-dell'ordinamento eventi simultanei e le formazioni ufficiali.
+### Database Supabase
+```powershell
+supabase link --project-ref <REF>          # richiede SUPABASE_ACCESS_TOKEN
+supabase db push                           # applica le migrations in ordine
+supabase db query --linked "select status, count(*) from matches group by status;"
+```
+
+### Edge Functions
+```powershell
+supabase functions deploy provider-proxy
+supabase functions deploy cron-tasks
+supabase functions deploy seed-league
+supabase secrets set API_FOOTBALL_KEY=...      # chiave provider: SOLO qui
+supabase secrets set SEED_SECRET=...           # protezione della seed
+```
+
+### Test motore di scoring
+```powershell
+# su un DB di test con le migrations applicate
+psql "<DB_URL>" -f supabase\tests\scoring_tests.sql
+```
+
+## Roadmap
+
+1. **Fase 2** — resilienza provider: cache eventi, correzioni manuali admin, audit trail
+2. **Fase 3** — CI: GitHub Actions (build + test Kotlin + test SQL su Postgres di servizio)
+3. **Fase 4** — sicurezza: test automatizzati RLS e hardening
+4. **Fase 5** — proposta semplificazione regolamento (documento)
+5. **Lancio** — piano API a pagamento per stagione corrente, rimozione artefatti demo,
+   modello statistico bonus calibrato su storico 2022-2024, release firmata su Play Store
+
+## Licenza e_note
+
+Progetto personale/dimostrativo. I dati calcistici sono forniti da API-Football e
+usati nel rispetto delle condizioni del provider. Il gioco è gratuito, senza vincite.
