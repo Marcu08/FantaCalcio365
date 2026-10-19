@@ -25,6 +25,13 @@ data class Match(
 }
 
 @Serializable
+data class Season(
+    val id: String,
+    val name: String,
+    @SerialName("current_matchday") val currentMatchday: Int = 1,
+)
+
+@Serializable
 data class Team(
     val id: String,
     val name: String,

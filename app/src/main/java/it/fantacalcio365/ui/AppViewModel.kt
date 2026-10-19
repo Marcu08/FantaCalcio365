@@ -13,8 +13,14 @@ import java.time.format.DateTimeFormatter
 class AppViewModel : ViewModel() {
     private val repo = Repository()
 
-    val seasons = listOf("2026/27") // placeholder: verrà da tabella seasons
-    private val currentSeason = "11111111-1111-1111-1111-111111111111"
+    private val _seasonId = MutableStateFlow<String?>(null)
+
+    suspend fun seasonId(): String? {
+        _seasonId.value?.let { return it }
+        val s = repo.seasons().firstOrNull()
+        _seasonId.value = s?.id
+        return s?.id
+    }
 
     private val _profile = MutableStateFlow<Profile?>(null)
     val profile: StateFlow<Profile?> = _profile
@@ -40,9 +46,10 @@ class AppViewModel : ViewModel() {
         viewModelScope.launch {
             runCatching {
                 _profile.value = repo.myProfile()
+                val sid = seasonId() ?: return@runCatching
                 _teams.value = repo.teams().associateBy { it.id }
-                _matches.value = repo.matches(currentSeason)
-                _leaderboard.value = repo.leaderboard(currentSeason)
+                _matches.value = repo.matches(sid)
+                _leaderboard.value = repo.leaderboard(sid)
                     .sortedWith(compareByDescending<LeaderboardEntry> { it.total }
                         .thenByDescending { it.exactResults }
                         .thenByDescending { it.exactScorers })

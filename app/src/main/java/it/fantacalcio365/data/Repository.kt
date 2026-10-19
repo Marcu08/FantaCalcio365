@@ -41,6 +41,9 @@ class Repository {
             .firstOrNull { it.id == uid }
     }
 
+    suspend fun seasons(): List<Season> =
+        client.postgrest.from("seasons").select().decodeList()
+
     // ---- Calendario e partite -------------------------------------------
     suspend fun matches(seasonId: String): List<Match> =
         client.postgrest.from("matches").select {
