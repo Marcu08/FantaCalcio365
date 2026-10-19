@@ -4,7 +4,8 @@
 // non interroga le partite CONFIRMED, gestisce provider offline.
 // =============================================================
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { mock } from "https://deno.land/std@0.224.0/testing/mock.ts";
+import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { mock } from "jsr:@std/mock@1";
 import { importIndex } from "./mocks.ts";
 
 type RpcCall = { name: string; args: any };
@@ -105,11 +106,13 @@ Deno.test("cron: cache scaduta - chiama provider, scrive cache e ingesta", async
   assertEquals(h.fetchCalls.some((u) => u.includes("PFIN")), true, "provider interrogato");
   assertEquals(h.rpcCalls.some((r) => r.name === "cache_match_events"), true, "cache scritta");
   const ingest = h.rpcCalls.find((r) => r.name === "ingest_match_result");
-  assertEquals(ingest != null, true);
-  // §4: il 2T e' la differenza ft - ht (solo gol seconda frazione)
-  assertEquals(ingest.args.p_result.ht2_home, 1);
-  assertEquals(ingest.args.p_result.ht2_away, 1);
-  assertEquals(ingest.args.p_result.status, "CONFIRMED");
+  assertEquals(ingest != null, true, "ingest_match_result chiamata");
+  if (ingest != null) {
+    // §4: il 2T e' la differenza ft - ht (solo gol seconda frazione)
+    assertEquals(ingest.args.p_result.ht2_home, 1);
+    assertEquals(ingest.args.p_result.ht2_away, 1);
+    assertEquals(ingest.args.p_result.status, "CONFIRMED");
+  }
   h.cleanup();
 });
 

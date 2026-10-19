@@ -3,7 +3,7 @@
 // Esecuzione: deno test --allow-all supabase/functions/tests/
 // =============================================================
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { mock } from "https://deno.land/std@0.224.0/testing/mock.ts";
+import { mock } from "jsr:@std/mock@1";
 
 // ---- helper: mock client Supabase -----------------------------
 export type RpcCall = { name: string; args: any };
@@ -56,7 +56,7 @@ export async function callHandler(handler: any, body: any, extraHeaders: Record<
   const req = new Request("http://x/", {
     method: "POST",
     headers: { "Content-Type": "application/json", ...extraHeaders },
-    body: body instanceof string ? body : JSON.stringify(body),
+    body: typeof body === "string" ? body : JSON.stringify(body),
   });
   const res = await handler(req);
   return { status: res.status, json: await res.json().catch(() => null) };
