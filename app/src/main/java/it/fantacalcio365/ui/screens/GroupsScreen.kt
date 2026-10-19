@@ -24,7 +24,7 @@ fun GroupsScreen(vm: AppViewModel) {
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
         OutlinedTextField(
-            joinCode, { joinCode },
+            joinCode, { joinCode = it },
             label = { Text("Codice invito") },
             modifier = Modifier.fillMaxWidth(),
         )
@@ -33,7 +33,7 @@ fun GroupsScreen(vm: AppViewModel) {
         }
 
         OutlinedTextField(
-            newGroupName, { newGroupName },
+            newGroupName, { newGroupName = it },
             label = { Text("Nome nuovo gruppo") },
             modifier = Modifier.fillMaxWidth(),
         )

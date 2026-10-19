@@ -41,20 +41,20 @@ fun AuthScreen(onSuccess: () -> Unit, vm: AppViewModel = viewModel()) {
 
         if (isRegister) {
             OutlinedTextField(
-                username, { username },
+                username, { username = it },
                 label = { Text("Nome utente") },
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(8.dp))
         }
         OutlinedTextField(
-            email, { email },
+            email, { email = it },
             label = { Text("Email") },
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(
-            password, { password },
+            password, { password = it },
             label = { Text("Password") },
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.fillMaxWidth(),

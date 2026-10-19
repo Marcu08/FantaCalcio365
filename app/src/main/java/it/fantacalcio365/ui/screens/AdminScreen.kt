@@ -32,7 +32,7 @@ fun AdminScreen(vm: AppViewModel) {
         // eseguita via RPC con service_role
         var matchday by remember { mutableStateOf("1") }
         OutlinedTextField(
-            matchday, { matchday },
+            matchday, { matchday = it },
             label = { Text("Giornata da bloccare") },
         )
         Button(
