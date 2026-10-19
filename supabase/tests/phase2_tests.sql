@@ -223,7 +223,7 @@ insert into matches (id, season_id, matchday, provider_id, home_team_id, away_te
                      kickoff_at, status, locked_at,
                      ht_home_goals, ht_away_goals, ht2_home_goals, ht2_away_goals,
                      ft_home_goals, ft_away_goals)
-values ('cccccccc-0000-0000-0000-000000000002','11111111-1111-1111-1111-111111111111',1,'M2',
+values ('cccccccc-0000-0000-0000-000000000002','11111111-1111-1111-1111-111111111111',3,'M2',
         'aaaaaaaa-0000-0000-0000-000000000001','aaaaaaaa-0000-0000-0000-000000000002',
         now() - interval '2 hours','FINISHED', now() - interval '3 hours',
         0, 0,   0, 0,   0, 0);
