@@ -276,12 +276,12 @@ begin
     '{"sub":"dddddddd-0000-0000-0000-000000000002","role":"authenticated"}', true);
   begin
     -- la schedina di user2 e' su partita BLOCCATA (RA); provo a spostarla
-    -- sulla partita APERTA (RB)
+    -- sulla partita APERTA (RB): con il gap chiuso l'UPDATE non tocca righe
+    -- (RLS filtra la riga vecchia) e non solleva errori
     update predictions set match_id = 'cccccccc-0000-0000-0000-000000000002'
     where id = 'eeeeeeee-0000-0000-0000-000000000002';
-    raise exception 'FAIL: spostamento schedina bloccata accettato';
   exception when insufficient_privilege then
-    null; -- atteso: using verifica anche la riga vecchia
+    null; -- accettabile anche un errore esplicito, a seconda del piano
   end;
 end $$;
 
@@ -290,7 +290,7 @@ select pg_temp.assert_eq(
   (select count(*)::int from predictions
    where id = 'eeeeeeee-0000-0000-0000-000000000002'
      and match_id = 'cccccccc-0000-0000-0000-000000000001'),
-  1::int, 'GAP 2 chiuso: schedina bloccata non spostabile');
+  1::int, 'GAP 2 chiuso: schedina bloccata non spostabile (resta su RA)');
 
 -- TEST 8-bis: la LETTURA della propria schedina bloccata resta possibile
 -- (l'app deve mostrare la schedina compilata anche dopo il blocco)
