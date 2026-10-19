@@ -89,4 +89,5 @@ export async function handler(req: Request): Promise<Response> {
   }
 }
 
-Deno.serve(handler);
+// Serve solo quando eseguita direttamente (non nei test)
+if (import.meta.main) Deno.serve(handler);

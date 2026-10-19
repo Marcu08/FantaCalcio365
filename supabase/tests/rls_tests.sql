@@ -83,20 +83,22 @@ where id = 'eeeeeeee-0000-0000-0000-000000000002';
 
 -- No UPDATE post-blocco su pronostico preesistente
 do $$
-declare
-  v_changed int;
 begin
   perform set_config('role', 'authenticated', true);
   perform set_config('request.jwt.claims',
     '{"sub":"dddddddd-0000-0000-0000-000000000002","role":"authenticated"}', true);
-  update predictions set ht_home = 9 where id = 'eeeeeeee-0000-0000-0000-000000000002';
-  select count(*) into v_changed from predictions
-  where id = 'eeeeeeee-0000-0000-0000-000000000002' and ht_home = 9;
-  perform pg_temp.assert_eq(v_changed, 0::int,
-    'update pronostico post-blocco BLOCCATO (0 righe)');
+  begin
+    update predictions set ht_home = 9 where id = 'eeeeeeee-0000-0000-0000-000000000002';
+  exception when insufficient_privilege then
+    null; -- atteso: RLS rifiuta la modifica post-blocco
+  end;
 end $$;
 
 select set_config('role', 'postgres', true);
+select pg_temp.assert_eq(
+  (select count(*)::int from predictions
+   where id = 'eeeeeeee-0000-0000-0000-000000000002' and ht_home = 9),
+  0::int, 'update pronostico post-blocco BLOCCATO');
 
 -- =============================================================
 -- TEST 2: NO lettura pronostici altrui prima del blocco

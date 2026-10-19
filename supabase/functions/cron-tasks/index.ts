@@ -119,4 +119,5 @@ export async function handler(_req: Request): Promise<Response> {
   return Response.json({ ok: true, providerDown, skipped });
 }
 
-Deno.serve(handler);
+// Serve solo quando eseguita direttamente (non nei test)
+if (import.meta.main) Deno.serve(handler);
