@@ -122,8 +122,8 @@ create policy "member read membership" on group_members for select to authentica
   );
 create policy "self join" on group_members for insert to authenticated
   with check (
+    -- il codice invito è verificato dall'app cercando il gruppo per invite_code
     user_id = auth.uid()
-    and exists (select 1 from groups g where g.id = group_id and g.owner_id = auth.uid())
   );
 create policy "owner remove member" on group_members for delete to authenticated
   using (

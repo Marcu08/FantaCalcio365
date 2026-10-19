@@ -122,10 +122,14 @@ class Repository {
     suspend fun myGroups(): List<Group> =
         client.postgrest.from("groups").select().decodeList()
 
-    suspend fun createGroup(name: String): Group =
-        client.postgrest.from("groups").insert(mapOf("name" to name)) {
+    suspend fun createGroup(name: String): Group {
+        val uid = currentUserId() ?: error("Non autenticato")
+        return client.postgrest.from("groups").insert(
+            mapOf("name" to name, "owner_id" to uid)
+        ) {
             select()
         }.decodeSingle()
+    }
 
     suspend fun joinByCode(code: String, userId: String) {
         val group = client.postgrest.from("groups").select {
