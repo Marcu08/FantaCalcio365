@@ -274,7 +274,9 @@ begin
     override_at = now()
   where id = v_match_id;
 
-  -- Sostituzione completa del set eventi
+  -- Sostituzione completa del set eventi: azzero prima le statistiche
+  -- individuali di partita (altrimenti l'override somma ai valori precedenti)
+  update player_match_stats set goals = 0, yellow_cards = 0 where match_id = v_match_id;
   delete from match_events where match_id = v_match_id;
   for ev in select * from jsonb_array_elements(p_events) loop
     insert into match_events (match_id, event_order, minute, type, player_id,
