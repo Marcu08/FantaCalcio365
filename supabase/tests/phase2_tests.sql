@@ -88,7 +88,7 @@ select public.score_match('cccccccc-0000-0000-0000-000000000001');
 select pg_temp.assert_eq((select sum(total) from scores where match_id='cccccccc-0000-0000-0000-000000000001'),
                  (select s from t_sum1), 'Idempotenza: somme identiche');
 select pg_temp.assert_eq((select count(*)::int from scores where match_id='cccccccc-0000-0000-0000-000000000001'),
-                 (select n from t_sum1), 'Idempotenza: stesso numero righe');
+                 (select n::int from t_sum1), 'Idempotenza: stesso numero righe');
 select pg_temp.assert_eq((select count(*)::int from admin_audit_log where action='SCORE_RECALC'),
                  1::int, 'Idempotenza: ZERO righe audit nuove al secondo ricalcolo');
 
