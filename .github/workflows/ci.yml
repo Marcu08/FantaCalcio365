@@ -21,6 +21,9 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Rendi eseguibile gradlew
+        run: chmod +x gradlew
+
       - name: Assemble debug
         run: ./gradlew assembleDebug --no-daemon
 
@@ -45,7 +48,7 @@ jobs:
         run: supabase db reset
 
       - name: Test motore di scoring (FASE 1)
-        run: supabase db query --local --file supabase/tests/scoring_tests.sql
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f supabase/tests/scoring_tests.sql
 
       - name: Test fase 2 (cache, override, idempotenza, RLS)
-        run: supabase db query --local --file supabase/tests/phase2_tests.sql
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f supabase/tests/phase2_tests.sql
