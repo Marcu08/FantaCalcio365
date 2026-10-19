@@ -137,8 +137,8 @@ do $$
 declare
   err text;
 begin
-  select set_config('role', 'authenticated', true);
-  select set_config('request.jwt.claims',
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
     '{"sub":"dddddddd-0000-0000-0000-000000000001","role":"authenticated"}', true);
   begin
     perform public.admin_override_match('M1','{"status":"CONFIRMED","ht_home":0,"ht_away":0,"ht2_home":0,"ht2_away":0,"ft_home":0,"ft_away":0}','[]','abuso utente normale');
@@ -155,7 +155,7 @@ select set_config('role', 'postgres', true);
 -- =============================================================
 do $$
 begin
-  select set_config('role', 'authenticated', true);
+  perform set_config('role', 'authenticated', true);
   begin
     perform public.cache_match_events('X','cccccccc-0000-0000-0000-000000000001','{}','[]','ok',null);
     raise exception 'TEST FALLITO: authenticated puo' scrivere event_cache';
@@ -308,8 +308,8 @@ do $$
 declare
   v_visible int;
 begin
-  select set_config('role', 'authenticated', true);
-  select set_config('request.jwt.claims',
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
     '{"sub":"dddddddd-0000-0000-0000-000000000001","role":"authenticated"}', true);
   select count(*) into v_visible from admin_audit_log;
   select pg_temp.assert_eq(v_visible, 0::int,
@@ -323,8 +323,8 @@ do $$
 declare
   v_visible int;
 begin
-  select set_config('role', 'authenticated', true);
-  select set_config('request.jwt.claims',
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
     '{"sub":"dddddddd-0000-0000-0000-000000000002","role":"authenticated"}', true);
   select count(*) into v_visible from admin_audit_log;
   if v_visible < 1 then raise exception 'FAIL: admin non vede audit log'; end if;
