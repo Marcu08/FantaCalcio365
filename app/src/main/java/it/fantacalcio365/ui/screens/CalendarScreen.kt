@@ -15,6 +15,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import it.fantacalcio365.ui.formatKickoff
 import it.fantacalcio365.ui.AppViewModel
+import it.fantacalcio365.ui.components.*
 
 // Schermata 2 — Calendario raggruppato per giornata
 @Composable
@@ -30,6 +31,7 @@ fun CalendarScreen(vm: AppViewModel, onOpenMatch: (String) -> Unit) {
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        if (byMatchday.isEmpty()) { item(key = "empty") { EmptyState("Calendario non ancora disponibile", "Le giornate vengono caricate dal provider calcistico") } }
         byMatchday.forEach { (matchday, ms) ->
             val hasResult = ms.any { it.ftHome != null }
             item(key = "g$matchday") {

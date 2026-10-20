@@ -16,3 +16,8 @@ local.properties
 *.aab
 dump.sql
 *.dump
+
+# Backup dati (contengono potenziali dati personali, mai su git)
+backup_data_*/
+backup_prod*.sql
+backup_*.sql

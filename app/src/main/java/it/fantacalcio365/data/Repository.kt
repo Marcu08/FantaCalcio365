@@ -42,7 +42,9 @@ class Repository {
     }
 
     suspend fun seasons(): List<Season> =
-        client.postgrest.from("seasons").select().decodeList()
+        client.postgrest.from("seasons").select {
+            order("created_at", io.github.jan.supabase.postgrest.query.Order.DESCENDING)
+        }.decodeList()
 
     // ---- Calendario e partite -------------------------------------------
     suspend fun matches(seasonId: String): List<Match> =

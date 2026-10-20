@@ -70,9 +70,25 @@ Deno.serve(async (req) => {
     const teamByProvider = new Map((teamMap ?? []).map((t: any) => [t.provider_id, t.id]));
 
     // 3. Rose giocatori (1 richiesta per squadra) -------------------
+    // Salta le squadre gia' popolate: il piano gratuito ha ~10 req/min,
+    // quindi si rilancia piu' volte finche' tutte le rose sono caricate.
     let playersSeeded = 0;
-    for (const [providerId, internalId] of only ? [] : teamByProvider) {
+    const { data: teamsWithPlayers } = await admin.from("players").select("team_id");
+    const teamsDone = new Set((teamsWithPlayers ?? []).map((p: any) => p.team_id));
+    let squadsFirstError: any = null;
+    for (const [providerId, internalId] of (only === null || only === "squads") ? teamByProvider : []) {
+      if (teamsDone.has(internalId)) continue;
       const squadRes = await api(`players/squads?team=${providerId}`);
+      // API-Football restituisce errors={} o [] quando NON ci sono errori
+      const hasErrors = squadRes.errors != null &&
+        (Array.isArray(squadRes.errors)
+          ? squadRes.errors.length > 0
+          : Object.keys(squadRes.errors).length > 0);
+      if (hasErrors) {
+        if (!squadsFirstError) squadsFirstError = squadRes.errors;
+        await new Promise(r => setTimeout(r, 1500));
+        continue;
+      }
       const squad = squadRes.response?.[0]?.players ?? [];
       const rows = squad.map((p: any) => ({
         provider_id: String(p.id),
@@ -89,24 +105,24 @@ Deno.serve(async (req) => {
       await new Promise(r => setTimeout(r, 350));
     }
 
-    // 4. Calendario (saltato con ?only=bonus) -----------------------
+    // 4. Calendario (solo lancio completo o ?only=fixtures) ----------
     const FUTURE_FROM_MATCHDAY = 9;
     const SHIFT_MS = 1096 * 24 * 60 * 60 * 1000; // ~3 anni
-    const fixRes = only === "bonus"
+    const fixRes = only
       ? { response: [], errors: [] }
       : await api(`fixtures?league=${LEAGUE_ID}&season=${SEASON}`);
     const matchRows = (fixRes.response ?? []).map((f: any) => {
       const round = parseInt(String(f.league.round).replace(/\D/g, "")) || 0;
       const ht = f.score?.halftime;
       const ft = f.score?.fulltime;
+      const bothPlayed = f.fixture.status?.short === "FT" && round < FUTURE_FROM_MATCHDAY;
+      const isFuture = round >= FUTURE_FROM_MATCHDAY;
       const status = round >= FUTURE_FROM_MATCHDAY
         ? "SCHEDULED"
         : (bothPlayed ? "CONFIRMED" : (STATUS_MAP[f.fixture.status?.short] ?? "SCHEDULED"));
       const homeId = teamByProvider.get(String(f.teams.home.id));
       const awayId = teamByProvider.get(String(f.teams.away.id));
       if (!homeId || !awayId) return null;
-    const bothPlayed = f.fixture.status?.short === "FT" && round < FUTURE_FROM_MATCHDAY;
-    const isFuture = round >= FUTURE_FROM_MATCHDAY;
       const kickoff = isFuture
         ? new Date(new Date(f.fixture.date).getTime() + SHIFT_MS).toISOString()
         : f.fixture.date;
@@ -176,6 +192,7 @@ Deno.serve(async (req) => {
         teams_errors: teamsRes.errors ?? null,
         fixtures_count: fixRes.response?.length ?? 0,
         fixtures_errors: fixRes.errors ?? null,
+        squads_first_error: squadsFirstError,
       },
     });
   } catch (e) {

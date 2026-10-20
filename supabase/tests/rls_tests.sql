@@ -22,7 +22,8 @@ begin;
 insert into seasons (id, name) values ('11111111-1111-1111-1111-111111111111', 'RLS Season');
 insert into teams (id, provider_id, name, short_name) values
   ('aaaaaaaa-0000-0000-0000-000000000001','T1','Casa','CAS'),
-  ('aaaaaaaa-0000-0000-0000-000000000002','T2','Ospite','OSP');
+  ('aaaaaaaa-0000-0000-0000-000000000002','T2','Ospite','OSP'),
+  ('aaaaaaaa-0000-0000-0000-000000000003','T3','Terza','TER');
 insert into players (id, team_id, provider_id, name, position) values
   ('bbbbbbbb-0000-0000-0000-000000000001','aaaaaaaa-0000-0000-0000-000000000001','P1','FW Casa','FW'),
   ('bbbbbbbb-0000-0000-0000-000000000002','aaaaaaaa-0000-0000-0000-000000000002','P2','FW Ospite','FW'),
@@ -305,6 +306,51 @@ begin
   where prediction_id = 'eeeeeeee-0000-0000-0000-000000000002';
   perform pg_temp.assert_eq(v, 4::int,
     'Lettura propria schedina bloccata: ancora possibile');
+end $$;
+
+select set_config('role', 'postgres', true);
+
+-- =============================================================
+-- TEST 9 (FASE 4, P0): gara aggiunta DOPO il blocco della giornata
+-- → nessun pronostico tardivo possibile
+-- =============================================================
+select set_config('role', 'postgres', true);
+
+-- RA e' bloccata (locked_at passato); RB appartiene alla stessa giornata 1
+-- ma ha locked_at null. Aggiungo una NUOVA gara alla giornata 1 con
+-- kickoff futuro e locked_at null: senza la fix di 0010 accetterebbe
+-- pronostici tardivi (gap per-partita).
+insert into matches (id, season_id, matchday, provider_id, home_team_id, away_team_id,
+                     kickoff_at, status, locked_at) values
+  ('cccccccc-0000-0000-0000-000000000009','11111111-1111-1111-1111-111111111111',1,'RX',
+   'aaaaaaaa-0000-0000-0000-000000000003','aaaaaaaa-0000-0000-0000-000000000001',
+   now() + interval '2 hours','SCHEDULED', null);
+
+-- La prima gara della giornata (RA) e' gia' iniziata:
+select pg_temp.assert_eq(
+  (select count(*)::int from matches
+   where season_id = '11111111-1111-1111-1111-111111111111'
+     and matchday = 1 and kickoff_at <= now()),
+  1::int, 'Setup: la giornata 1 ha la prima gara gia'' iniziata (blocco attivo)');
+
+do $$
+begin
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    '{"sub":"dddddddd-0000-0000-0000-000000000001","role":"authenticated"}', true);
+  begin
+    insert into predictions (id, user_id, match_id, ht_home, ht_away, ht2_home, ht2_away)
+    values ('eeeeeeee-0000-0000-0000-000000000050',
+            'dddddddd-0000-0000-0000-000000000001',
+            'cccccccc-0000-0000-0000-000000000009', 1,0,0,1);
+    -- senza policy matchday-level l'insert passerebbe: con-check lo nega
+    if exists (select 1 from predictions where id = 'eeeeeeee-0000-0000-0000-000000000050') then
+      raise exception 'FAIL: pronostico tardivo su gara post-blocco ACCETTATO';
+    end if;
+  exception when insufficient_privilege then
+    null; -- atteso: RLS rifiuta l'insert (riga nuova su partita bloccata)
+  end;
+  raise notice 'PASS: nessun pronostico tardivo su gara aggiunta a giornata bloccata';
 end $$;
 
 select set_config('role', 'postgres', true);
