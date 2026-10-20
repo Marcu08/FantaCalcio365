@@ -58,6 +58,9 @@ const FIXTURE_OK = {
 };
 
 function setup(opts: { matches: any[]; fresh?: boolean }) {
+  Deno.env.set("API_FOOTBALL_KEY", "test-key");
+  Deno.env.set("SUPABASE_URL", "http://local");
+  Deno.env.set("SUPABASE_SERVICE_ROLE_KEY", "test-service");
   const mc = makeMockClient({ matches: opts.matches, fresh: opts.fresh });
   setMockFactory(() => mc.client);
   const fetchCalls: string[] = [];
@@ -105,7 +108,9 @@ Deno.test("cron: cache scaduta - chiama provider, scrive cache e ingesta", async
   const mod = await importIndex("../cron-tasks/index.ts");
   const res = await mod.handler(new Request("http://x/cron"));
   await res.json();
-  assertEquals(h.fetchCalls.some((u) => u.includes("PFIN")), true, "provider interrogato");
+  assertEquals(h.fetchCalls.some((u) => u.includes("id=PFIN") || u.includes("PFIN")), true, "provider interrogato");
+  assertEquals(h.fetchCalls.some((u) => u.includes("/v3/fixtures")), false, "path senza /v3/ duplicato");
+  assertEquals(h.fetchCalls.some((u) => u.includes("v3.football.api-sports.io/fixtures")), true, "host+path corretti");
   assertEquals(h.rpcCalls.some((r: any) => r.name === "cache_match_events"), true, "cache scritta");
   const ingest = h.rpcCalls.find((r: any) => r.name === "ingest_match_result");
   assertEquals(ingest != null, true, "ingest_match_result chiamata");

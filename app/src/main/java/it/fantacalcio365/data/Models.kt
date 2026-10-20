@@ -2,9 +2,7 @@ package it.fantacalcio365.data
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-
-// Modelli di dominio. I punteggi e le scadenze NON vengono mai calcolati
-// o validati qui: arrivano già pronti dal server (§12).
+import java.time.Instant
 
 @Serializable
 data class Match(
@@ -12,17 +10,32 @@ data class Match(
     val matchday: Int,
     @SerialName("provider_id") val providerId: String? = null,
     @SerialName("kickoff_at") val kickoffAt: String,
-    val status: String, // SCHEDULED | LIVE | FINISHED | CONFIRMED | POSTPONED | CANCELLED
+    val status: String,
     @SerialName("locked_at") val lockedAt: String? = null,
     @SerialName("ht_home_goals") val htHome: Int? = null,
     @SerialName("ht_away_goals") val htAway: Int? = null,
+    @SerialName("ht2_home_goals") val ht2Home: Int? = null,
+    @SerialName("ht2_away_goals") val ht2Away: Int? = null,
     @SerialName("ft_home_goals") val ftHome: Int? = null,
     @SerialName("ft_away_goals") val ftAway: Int? = null,
     @SerialName("home_team_id") val homeTeamId: String? = null,
     @SerialName("away_team_id") val awayTeamId: String? = null,
 ) {
-    val isLocked: Boolean get() = lockedAt != null
+    val isFinished: Boolean get() = status in listOf("LIVE", "FINISHED", "CONFIRMED")
+    val isLocked: Boolean
+        get() = lockedAt != null || isFinished || status == "CANCELLED"
 }
+
+fun List<Match>.isMatchdayLocked(matchday: Int): Boolean {
+    val md = filter { it.matchday == matchday && it.status != "CANCELLED" }
+    if (md.any { it.lockedAt != null || it.isFinished }) return true
+    val first = md.minByOrNull { it.kickoffAt } ?: return false
+    return runCatching { Instant.parse(first.kickoffAt).isBefore(Instant.now()) }.getOrDefault(false)
+}
+
+fun List<Match>.matchdayFirstKickoff(matchday: Int): String? =
+    filter { it.matchday == matchday && it.status != "CANCELLED" }
+        .minByOrNull { it.kickoffAt }?.kickoffAt
 
 @Serializable
 data class Season(
@@ -39,21 +52,18 @@ data class Team(
     @SerialName("logo_url") val logoUrl: String? = null,
 )
 
-enum class Availability { PROBABLE, CONFIRMED, RESERVE, UNAVAILABLE }
-
 @Serializable
 data class Player(
     val id: String,
     @SerialName("team_id") val teamId: String,
     val name: String,
-    val position: String, // GK | DF | MF | FW
+    val position: String,
 ) {
     val roleLabel: String get() = when (position) {
         "GK" -> "Portiere"; "DF" -> "Difensore"; "MF" -> "Centrocampista"; else -> "Attaccante"
     }
 }
 
-// Bonus congelato mostrato all'utente: SOLO punti, mai probabilità interne (§6)
 @Serializable
 data class PlayerMatchBonus(
     @SerialName("player_id") val playerId: String,
@@ -82,7 +92,16 @@ data class PredictionPlayer(
     @SerialName("is_marked_scorer") val isMarkedScorer: Boolean = false,
 )
 
-// Schedina in compilazione (stato locale, validata dal server al salvataggio)
+@Serializable
+data class MatchEvent(
+    val id: String? = null,
+    @SerialName("match_id") val matchId: String? = null,
+    @SerialName("event_order") val eventOrder: Int = 0,
+    val minute: Int? = null,
+    val type: String,
+    @SerialName("player_id") val playerId: String? = null,
+)
+
 data class Schedina(
     val htHome: Int = 0, val htAway: Int = 0,
     val ht2Home: Int = 0, val ht2Away: Int = 0,
@@ -91,16 +110,26 @@ data class Schedina(
     val firstSubOut: String? = null,
     val firstYellow: String? = null,
 ) {
-    val isComplete: Boolean
-        get() = selected.size == 4 &&
-                selected.count { it.startsWith("H") } >= 1 &&
-                selected.count { it.startsWith("A") } >= 1 &&
-                scorers.isNotEmpty()
+    fun isComplete(
+        homeTeamId: String?,
+        awayTeamId: String?,
+        playersById: Map<String, Player>,
+    ): Boolean {
+        if (selected.size != 4 || scorers.isEmpty()) return false
+        if (scorers.any { it !in selected }) return false
+        val teams = selected.mapNotNull { playersById[it]?.teamId }
+        if (teams.size != 4) return false
+        val homeOk = homeTeamId != null && teams.any { it == homeTeamId }
+        val awayOk = awayTeamId != null && teams.any { it == awayTeamId }
+        return homeOk && awayOk
+    }
 }
 
 @Serializable
 data class Score(
     val total: Double,
+    @SerialName("match_id") val matchId: String? = null,
+    val matchday: Int = 0,
     @SerialName("pts_ht") val ptsHt: Int,
     @SerialName("pts_ht2") val ptsHt2: Int,
     @SerialName("pts_scorers") val ptsScorers: Double,

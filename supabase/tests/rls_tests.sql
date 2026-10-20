@@ -355,4 +355,84 @@ end $$;
 
 select set_config('role', 'postgres', true);
 
+-- =============================================================
+-- TEST 10: join gruppo solo tramite codice (no insert diretto)
+-- =============================================================
+insert into groups (id, name, owner_id, invite_code) values
+  ('99999999-0000-0000-0000-000000000001', 'Amici',
+   'dddddddd-0000-0000-0000-000000000001', 'abcd1234');
+
+do $$
+begin
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    '{"sub":"dddddddd-0000-0000-0000-000000000002","role":"authenticated"}', true);
+  begin
+    insert into group_members(group_id, user_id) values
+      ('99999999-0000-0000-0000-000000000001',
+       'dddddddd-0000-0000-0000-000000000002');
+    if exists (
+      select 1 from group_members
+      where group_id = '99999999-0000-0000-0000-000000000001'
+        and user_id = 'dddddddd-0000-0000-0000-000000000002'
+    ) then
+      raise exception 'FAIL: join diretto senza codice ACCETTATO';
+    end if;
+  exception when insufficient_privilege then
+    null;
+  end;
+end $$;
+
+select set_config('role', 'postgres', true);
+
+do $$
+declare g public.groups;
+begin
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    '{"sub":"dddddddd-0000-0000-0000-000000000002","role":"authenticated"}', true);
+  select * into g from public.join_group_by_code('abcd1234');
+  perform pg_temp.assert_eq(g.id,
+    '99999999-0000-0000-0000-000000000001'::uuid,
+    'join_group_by_code con codice valido');
+end $$;
+
+select set_config('role', 'postgres', true);
+select pg_temp.assert_eq(
+  (select count(*)::int from group_members
+   where group_id = '99999999-0000-0000-0000-000000000001'
+     and user_id = 'dddddddd-0000-0000-0000-000000000002'),
+  1::int, 'membro inserito tramite RPC');
+
+-- =============================================================
+-- TEST 11: save_prediction atomico + vincolo casa/ospite
+-- Partita aperta: giornata 2 futura
+-- =============================================================
+insert into matches (id, season_id, matchday, provider_id, home_team_id, away_team_id,
+                     kickoff_at, status, locked_at) values
+  ('cccccccc-0000-0000-0000-000000000010','11111111-1111-1111-1111-111111111111',2,'R10',
+   'aaaaaaaa-0000-0000-0000-000000000001','aaaaaaaa-0000-0000-0000-000000000002',
+   now() + interval '3 days','SCHEDULED', null);
+
+do $$
+declare v uuid;
+begin
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    '{"sub":"dddddddd-0000-0000-0000-000000000001","role":"authenticated"}', true);
+  begin
+    v := public.save_prediction(
+      'cccccccc-0000-0000-0000-000000000010',
+      1,0,0,1, null, null,
+      '[{"player_id":"bbbbbbbb-0000-0000-0000-000000000001","is_marked_scorer":true},
+        {"player_id":"bbbbbbbb-0000-0000-0000-000000000003","is_marked_scorer":false},
+        {"player_id":"bbbbbbbb-0000-0000-0000-000000000002","is_marked_scorer":false},
+        {"player_id":"bbbbbbbb-0000-0000-0000-000000000004","is_marked_scorer":false}]'::jsonb
+    );
+    perform pg_temp.assert_eq((v is not null), true, 'save_prediction con 4 giocatori misti');
+  end;
+end $$;
+
+select set_config('role', 'postgres', true);
+
 rollback;

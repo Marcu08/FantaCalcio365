@@ -4,17 +4,16 @@ import io.github.jan.supabase.gotrue.auth
 import io.github.jan.supabase.gotrue.providers.builtin.Email
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Order
+import io.github.jan.supabase.postgrest.rpc
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-// Repository: tutte le chiamate al database. Le regole di gioco (scadenze,
-// punteggi, validazioni) restano responsabilità del server (§12): qui
-// si legge e si scrive soltanto.
 class Repository {
 
     private val client get() = SupabaseProvider.client
 
-    // ---- Autenticazione -------------------------------------------------
     suspend fun signUp(email: String, password: String, username: String) {
         client.auth.signUpWith(Email) {
             this.email = email
@@ -34,19 +33,20 @@ class Repository {
 
     suspend fun currentUserId(): String? = client.auth.currentUserOrNull()?.id
 
+    suspend fun hasSession(): Boolean = client.auth.currentSessionOrNull() != null
+
     suspend fun myProfile(): Profile? {
         val uid = currentUserId() ?: return null
-        return client.postgrest.from("profiles").select()
-            .decodeList<Profile>()
-            .firstOrNull { it.id == uid }
+        return client.postgrest.from("profiles").select {
+            filter { eq("id", uid) }
+        }.decodeList<Profile>().firstOrNull()
     }
 
     suspend fun seasons(): List<Season> =
         client.postgrest.from("seasons").select {
-            order("created_at", io.github.jan.supabase.postgrest.query.Order.DESCENDING)
+            order("created_at", Order.DESCENDING)
         }.decodeList()
 
-    // ---- Calendario e partite -------------------------------------------
     suspend fun matches(seasonId: String): List<Match> =
         client.postgrest.from("matches").select {
             filter { eq("season_id", seasonId) }
@@ -57,6 +57,12 @@ class Repository {
         client.postgrest.from("matches").select {
             filter { eq("id", id) }
         }.decodeSingle()
+
+    suspend fun matchEvents(matchId: String): List<MatchEvent> =
+        client.postgrest.from("match_events").select {
+            filter { eq("match_id", matchId) }
+            order("event_order", Order.ASCENDING)
+        }.decodeList()
 
     suspend fun teams(): List<Team> =
         client.postgrest.from("teams").select().decodeList()
@@ -73,13 +79,11 @@ class Repository {
             }.decodeList()
         }
 
-    // Bonus congelati per i giocatori di una partita (solo punti, §6)
     suspend fun bonuses(matchId: String): List<PlayerMatchBonus> =
         client.postgrest.from("player_match_stats").select {
             filter { eq("match_id", matchId) }
         }.decodeList<PlayerMatchBonus>().filter { it.frozenAt != null }
 
-    // ---- Schedine --------------------------------------------------------
     suspend fun myPrediction(matchId: String): Pair<Prediction, List<PredictionPlayer>>? {
         val p = client.postgrest.from("predictions").select {
             filter { eq("match_id", matchId) }
@@ -90,26 +94,27 @@ class Repository {
         return p to players
     }
 
-    suspend fun savePrediction(p: Prediction, players: List<PredictionPlayer>) {
-        val saved = if (p.id != null) {
-            client.postgrest.from("predictions").update(p) {
-                filter { eq("id", p.id) }
-                select()
-            }.decodeSingle<Prediction>()
-        } else {
-            client.postgrest.from("predictions").insert(p) {
-                select()
-            }.decodeSingle<Prediction>()
+    suspend fun savePrediction(matchId: String, s: Schedina, players: List<PredictionPlayer>) {
+        val payload = buildJsonObject {
+            put("p_match_id", matchId)
+            put("p_ht_home", s.htHome)
+            put("p_ht_away", s.htAway)
+            put("p_ht2_home", s.ht2Home)
+            put("p_ht2_away", s.ht2Away)
+            if (s.firstSubOut != null) put("p_first_sub_out", s.firstSubOut) else put("p_first_sub_out", JsonNull)
+            if (s.firstYellow != null) put("p_first_yellow", s.firstYellow) else put("p_first_yellow", JsonNull)
+            put("p_players", buildJsonArray {
+                players.forEach { pl ->
+                    add(buildJsonObject {
+                        put("player_id", pl.playerId)
+                        put("is_marked_scorer", pl.isMarkedScorer)
+                    })
+                }
+            })
         }
-        client.postgrest.from("prediction_players").delete {
-            filter { eq("prediction_id", saved.id!!) }
-        }
-        client.postgrest.from("prediction_players").insert(
-            players.map { it.copy(predictionId = saved.id) }
-        )
+        client.postgrest.rpc("save_prediction", payload)
     }
 
-    // ---- Punteggi e classifica -------------------------------------------
     suspend fun myScores(): List<Score> =
         client.postgrest.from("scores").select {
             order("matchday", Order.ASCENDING)
@@ -120,7 +125,6 @@ class Repository {
             filter { eq("season_id", seasonId) }
         }.decodeList()
 
-    // ---- Gruppi ------------------------------------------------------------
     suspend fun myGroups(): List<Group> =
         client.postgrest.from("groups").select().decodeList()
 
@@ -133,12 +137,15 @@ class Repository {
         }.decodeSingle()
     }
 
-    suspend fun joinByCode(code: String, userId: String) {
-        val group = client.postgrest.from("groups").select {
-            filter { eq("invite_code", code.trim()) }
-        }.decodeSingle<Group>()
-        client.postgrest.from("group_members").insert(
-            mapOf("group_id" to group.id, "user_id" to userId)
-        )
+    suspend fun joinByCode(code: String): Group =
+        client.postgrest.rpc("join_group_by_code", buildJsonObject {
+            put("p_code", code.trim())
+        }).decodeSingle()
+
+    suspend fun lockMatchday(seasonId: String, matchday: Int) {
+        client.postgrest.rpc("admin_lock_matchday", buildJsonObject {
+            put("p_season_id", seasonId)
+            put("p_matchday", matchday)
+        })
     }
 }

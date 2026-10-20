@@ -10,6 +10,7 @@
 // È idempotente: può essere rilanciata senza duplicare dati.
 // =============================================================
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { apiFootballHeaders, apiFootballUrl } from "../_shared/api-football.ts";
 
 const LEAGUE_ID = 135; // Serie A
 // Piano gratuito API-Football: solo stagioni 2022-2024. Per la stagione
@@ -39,11 +40,12 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  const key = Deno.env.get("API_FOOTBALL_KEY")!;
-  const headers = { "x-apisports-key": key };
-  const api = (path: string) =>
-    fetch(`https://v3.football.api-sports.io/${path}`, { headers })
-      .then(r => r.json());
+  const api = (path: string) => {
+    const [endpoint, qs] = path.split("?");
+    return fetch(apiFootballUrl(endpoint, new URLSearchParams(qs ?? "")), {
+      headers: apiFootballHeaders(),
+    }).then((r) => r.json());
+  };
 
   try {
     // 1. Stagione ------------------------------------------------

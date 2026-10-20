@@ -12,12 +12,14 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.*
 import it.fantacalcio365.ui.*
+import it.fantacalcio365.ui.components.LoadingBox
 import it.fantacalcio365.ui.screens.*
 import it.fantacalcio365.ui.theme.FantaCalcio365Theme
 
@@ -31,18 +33,31 @@ class MainActivity : ComponentActivity() {
 }
 
 sealed class Dest(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    object Home : Dest("home", "Home", Icons.Default.Home)
-    object Calendar : Dest("calendar", "Calendario", Icons.Default.EventNote)
-    object Leaderboard : Dest("leaderboard", "Classifica", Icons.Default.EmojiEvents)
-    object Groups : Dest("groups", "Gruppi", Icons.Default.Groups)
-    object Profile : Dest("profile", "Profilo", Icons.Default.Person)
+    data object Home : Dest("home", "Home", Icons.Default.Home)
+    data object Calendar : Dest("calendar", "Calendario", Icons.Default.EventNote)
+    data object Leaderboard : Dest("leaderboard", "Classifica", Icons.Default.EmojiEvents)
+    data object Groups : Dest("groups", "Gruppi", Icons.Default.Groups)
+    data object Profile : Dest("profile", "Profilo", Icons.Default.Person)
 }
+
 @Composable
 fun AppRoot(vm: AppViewModel = viewModel()) {
     val navController = rememberNavController()
     val profile by vm.profile.collectAsState()
+    val bootstrapped by vm.bootstrapped.collectAsState()
     val backStack by navController.currentBackStackEntryAsState()
     val current = backStack?.destination?.route
+
+    if (!bootstrapped) {
+        LoadingBox("Sessione…")
+        return
+    }
+
+    LaunchedEffect(profile) {
+        if (profile == null && current != null && current != "auth") {
+            navController.navigate("auth") { popUpTo(0) { inclusive = true } }
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -51,8 +66,14 @@ fun AppRoot(vm: AppViewModel = viewModel()) {
                     listOf(Dest.Home, Dest.Calendar, Dest.Leaderboard, Dest.Groups, Dest.Profile).forEach { d ->
                         NavigationBarItem(
                             selected = current == d.route,
-                            onClick = { navController.navigate(d.route) { popUpTo(Dest.Home.route); launchSingleTop = true } },
-                            icon = { Icon(d.icon, null) },
+                            onClick = {
+                                navController.navigate(d.route) {
+                                    popUpTo(Dest.Home.route) { saveState = true }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            },
+                            icon = { Icon(d.icon, contentDescription = d.label) },
                             label = { Text(d.label) },
                         )
                     }
@@ -62,11 +83,14 @@ fun AppRoot(vm: AppViewModel = viewModel()) {
     ) { pad ->
         NavHost(
             navController = navController,
-            startDestination = if (profile == null) "auth" else "home",
+            startDestination = if (profile == null) "auth" else Dest.Home.route,
             modifier = Modifier.padding(pad),
         ) {
             composable("auth") {
-                AuthScreen(onSuccess = { vm.refresh(); navController.navigate("home") { popUpTo(0) } })
+                AuthScreen(
+                    vm = vm,
+                    onSuccess = { navController.navigate(Dest.Home.route) { popUpTo(0) { inclusive = true } } },
+                )
             }
             composable(Dest.Home.route) {
                 HomeScreen(
@@ -95,8 +119,13 @@ fun AppRoot(vm: AppViewModel = viewModel()) {
             }
             composable(Dest.Leaderboard.route) { LeaderboardScreen(vm = vm) }
             composable(Dest.Groups.route) { GroupsScreen(vm = vm) }
-            composable(Dest.Profile.route) { ProfileScreen(vm = vm) }
-            composable("admin") { AdminScreen(vm = vm) }
+            composable(Dest.Profile.route) {
+                ProfileScreen(
+                    vm = vm,
+                    onOpenAdmin = { navController.navigate("admin") },
+                )
+            }
+            composable("admin") { AdminScreen(vm = vm, onBack = { navController.popBackStack() }) }
         }
     }
 }

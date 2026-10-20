@@ -9,11 +9,11 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 
-// ViewModel condiviso: espone stato, mai logica di punteggio (quella è del server)
 class AppViewModel : ViewModel() {
     private val repo = Repository()
 
     private val _seasonId = MutableStateFlow<String?>(null)
+    val seasonIdFlow: StateFlow<String?> = _seasonId
 
     suspend fun seasonId(): String? {
         _seasonId.value?.let { return it }
@@ -40,12 +40,35 @@ class AppViewModel : ViewModel() {
     private val _groups = MutableStateFlow<List<Group>>(emptyList())
     val groups: StateFlow<List<Group>> = _groups
 
+    private val _loading = MutableStateFlow(false)
+    val loading: StateFlow<Boolean> = _loading
+
+    private val _loadError = MutableStateFlow<String?>(null)
+    val loadError: StateFlow<String?> = _loadError
+
+    private val _bootstrapped = MutableStateFlow(false)
+    val bootstrapped: StateFlow<Boolean> = _bootstrapped
+
     val repo_ = repo
+
+    init {
+        viewModelScope.launch {
+            runCatching { repo.hasSession() }
+            refresh()
+            _bootstrapped.value = true
+        }
+    }
 
     fun refresh() {
         viewModelScope.launch {
+            _loading.value = true
+            _loadError.value = null
             runCatching {
                 _profile.value = repo.myProfile()
+                if (_profile.value == null) {
+                    clearData()
+                    return@runCatching
+                }
                 val sid = seasonId() ?: return@runCatching
                 _teams.value = repo.teams().associateBy { it.id }
                 _matches.value = repo.matches(sid)
@@ -55,24 +78,46 @@ class AppViewModel : ViewModel() {
                         .thenByDescending { it.exactScorers })
                 _scores.value = repo.myScores()
                 _groups.value = repo.myGroups()
+            }.onFailure {
+                _loadError.value = it.message ?: "Errore di rete"
             }
+            _loading.value = false
+        }
+    }
+
+    private fun clearData() {
+        _matches.value = emptyList()
+        _teams.value = emptyMap()
+        _leaderboard.value = emptyList()
+        _scores.value = emptyList()
+        _groups.value = emptyList()
+        _seasonId.value = null
+    }
+
+    fun signIn(email: String, password: String, onDone: (Throwable?) -> Unit) {
+        viewModelScope.launch {
+            runCatching { repo.signIn(email, password) }
+                .onSuccess { refresh(); onDone(null) }
+                .onFailure { onDone(it) }
+        }
+    }
+
+    fun signUp(email: String, password: String, username: String, onDone: (Throwable?) -> Unit) {
+        viewModelScope.launch {
+            runCatching { repo.signUp(email, password, username) }
+                .onSuccess { refresh(); onDone(null) }
+                .onFailure { onDone(it) }
         }
     }
 
     fun saveSchedina(matchId: String, s: Schedina, onDone: (Throwable?) -> Unit) {
         viewModelScope.launch {
             runCatching {
-                val uid = repo.currentUserId() ?: error("Non autenticato")
-                val existing = repo.myPrediction(matchId)
-                val pred = (existing?.first ?: Prediction(matchId = matchId)).copy(
-                    htHome = s.htHome, htAway = s.htAway,
-                    ht2Home = s.ht2Home, ht2Away = s.ht2Away,
-                    firstSubOutPlayerId = s.firstSubOut,
-                    firstYellowPlayerId = s.firstYellow,
-                )
+                repo.currentUserId() ?: error("Non autenticato")
                 repo.savePrediction(
-                    pred.copy(id = existing?.first?.id),
-                    s.selected.map { PredictionPlayer(playerId = it, isMarkedScorer = it in s.scorers) }
+                    matchId,
+                    s,
+                    s.selected.map { PredictionPlayer(playerId = it, isMarkedScorer = it in s.scorers) },
                 )
             }.onSuccess { refresh(); onDone(null) }
                 .onFailure { onDone(it) }
@@ -89,21 +134,32 @@ class AppViewModel : ViewModel() {
 
     fun joinGroup(code: String, onDone: (Throwable?) -> Unit) {
         viewModelScope.launch {
+            runCatching { repo.joinByCode(code) }
+                .onSuccess { refresh(); onDone(null) }
+                .onFailure { onDone(it) }
+        }
+    }
+
+    fun lockMatchday(matchday: Int, onDone: (Throwable?) -> Unit) {
+        viewModelScope.launch {
             runCatching {
-                val uid = repo.currentUserId() ?: error("Non autenticato")
-                repo.joinByCode(code, uid)
+                val sid = seasonId() ?: error("Stagione assente")
+                repo.lockMatchday(sid, matchday)
             }.onSuccess { refresh(); onDone(null) }
                 .onFailure { onDone(it) }
         }
     }
 
     fun logout(onDone: () -> Unit) {
-        viewModelScope.launch { runCatching { repo.signOut() }; onDone() }
+        viewModelScope.launch {
+            runCatching { repo.signOut() }
+            _profile.value = null
+            clearData()
+            onDone()
+        }
     }
 }
 
-// utility di formattazione per scadenze (solo visualizzazione, la verifica
-// del blocco è sempre server-side §9)
 fun formatKickoff(iso: String?): String = runCatching {
     DateTimeFormatter.ofPattern("dd/MM HH:mm")
         .withLocale(java.util.Locale.ITALY)
