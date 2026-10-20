@@ -25,6 +25,7 @@ fun SchedinaScreen(vm: AppViewModel, matchId: String, onBack: () -> Unit) {
     var schedina by remember { mutableStateOf(Schedina()) }
     var predId by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var saving by remember { mutableStateOf(false) }
 
     LaunchedEffect(matchId) {
         runCatching {
@@ -135,15 +136,26 @@ fun SchedinaScreen(vm: AppViewModel, matchId: String, onBack: () -> Unit) {
         }
 
         Button(
-            enabled = schedina.isComplete,
+            enabled = schedina.isComplete(
+                match!!.homeTeamId, match!!.awayTeamId,
+                allPlayers.associateBy { it.id },
+            ) && !saving,
             modifier = Modifier.fillMaxWidth(),
             onClick = {
+                saving = true
                 vm.saveSchedina(matchId, schedina) { e ->
+                    saving = false
                     error = e?.message
                     if (e == null) onBack()
                 }
             },
-        ) { Text("Salva pronostico") }
+        ) {
+            if (saving) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            } else {
+                Text("Salva pronostico")
+            }
+        }
     }
 }
 
@@ -222,10 +234,8 @@ private fun DropdownPick(label: String, players: List<Player>, current: String?,
     }
 }
 
-// Distinzione esplicita tra dati certi e incerti (§9): il dettaglio
-// ufficiale arriva dal campo availability del server quando sincronizzato
+// Stato onesto del giocatore (§9: non presentare dati incerti come certi).
+// Finché il provider non pubblica formazioni ufficiali, la rosa è
+// semplicemente "in rosa": nessuna finzione di titolarità.
 @Composable
-private fun availabilityLabel(p: Player): String = when (p.position) {
-    "GK" -> "Probabile"
-    else -> "Probabile"
-}
+private fun availabilityLabel(p: Player): String = "in rosa"

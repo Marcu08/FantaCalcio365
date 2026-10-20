@@ -22,6 +22,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import it.fantacalcio365.ui.AppViewModel
+import it.fantacalcio365.data.Group
+import it.fantacalcio365.data.GroupLeaderboardEntry
 
 // Schermata 9 — Gruppi privati e inviti tramite codice
 @Composable
@@ -102,24 +104,68 @@ fun GroupsScreen(vm: AppViewModel) {
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(groups, key = { it.id }) { g ->
-                Card(Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(1.dp)) {
-                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(g.name, style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                "Codice: ${g.inviteCode}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        IconButton(onClick = {
-                            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            cm.setPrimaryClip(ClipData("invite", null, ClipData.Item(g.inviteCode)))
-                            Toast.makeText(context, "Codice copiato!", Toast.LENGTH_SHORT).show()
-                        }) {
-                            Icon(Icons.Default.ContentCopy, "Copia codice",
-                                tint = MaterialTheme.colorScheme.primary)
-                        }
+                GroupCard(vm, g, context)
+            }
+        }
+    }
+}
+
+// Card gruppo con classifica espandibile (RPC riservata ai membri)
+@Composable
+private fun GroupCard(vm: AppViewModel, g: Group, context: Context) {
+    var expanded by remember { mutableStateOf(false) }
+    var ranking by remember { mutableStateOf<List<GroupLeaderboardEntry>>(emptyList()) }
+    var rankError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(expanded) {
+        if (expanded && ranking.isEmpty() && rankError == null) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { vm.repo_.groupLeaderboard(g.id) }
+                    .onSuccess { ranking = it }
+                    .onFailure { rankError = it.message ?: "Errore classifica" }
+            }
+        }
+    }
+
+    Card(
+        onClick = { expanded = !expanded },
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(1.dp),
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(g.name, style = MaterialTheme.typography.titleSmall)
+                    Text("Codice: ${g.inviteCode}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = {
+                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData("invite", null, ClipData.Item(g.inviteCode)))
+                    Toast.makeText(context, "Codice copiato!", Toast.LENGTH_SHORT).show()
+                }) {
+                    Icon(Icons.Default.ContentCopy, "Copia codice",
+                        tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+            if (expanded) {
+                Spacer(Modifier.height(8.dp))
+                rankError?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error)
+                }
+                if (ranking.isEmpty() && rankError == null) {
+                    Text("Caricamento classifica…", style = MaterialTheme.typography.labelSmall)
+                }
+                ranking.forEachIndexed { i, e ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                        Text("${i + 1}º", Modifier.width(36.dp),
+                            style = MaterialTheme.typography.labelLarge)
+                        Text(e.username, Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium)
+                        Text("%.0f".format(e.total), style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary)
                     }
                 }
             }

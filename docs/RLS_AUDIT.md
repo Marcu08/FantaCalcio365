@@ -31,12 +31,21 @@ Supabase locale) con `supabase/tests/rls_tests.sql` e `phase2_tests.sql`.
 | GAP 1 | **ALTA** | `prediction_players`: il `with check` verificava solo la proprietà, non il blocco → aggiunta giocatori a schedina bloccata via API diretta | `0009`: policy di scrittura con verifica blocco (lettura separata, resta possibile al owner) | `rls_tests.sql` TEST 6 |
 | GAP 2 | **MEDIA** | `predictions` UPDATE: il `using` non verificava il blocco della riga vecchia → spostamento di una schedina bloccata su una partita aperta | `0009`: `using` + `with check` entrambi con verifica blocco | `rls_tests.sql` TEST 7 |
 | GAP 0 (chiuso in FASE 2) | ALTA | ricorsione infinita policy `groups` ↔ `group_members` | `0007`: helper `is_group_member`/`is_group_owner` security definer | CI (creazione gruppo test) |
-| GAP 0-bis (chiuso in FASE 2) | MEDIA | funzioni interne eseguibili da PUBLIC di default | `0008`: REVOKE/GRANT espliciti, audit `pg_proc` in CI (5 funzioni eseguibili: `admin_override_match`, `admin_release_override`, `is_admin`, `is_group_member`, `is_group_owner`) | `phase2_tests.sql` TEST 8b |
+| GAP 0-bis (chiuso in FASE 2) | MEDIA | funzioni interne eseguibili da PUBLIC di default | `0008`: REVOKE/GRANT espliciti, audit `pg_proc` in CI con lista esatta delle funzioni eseguibili (10, vedi sotto) | `phase2_tests.sql` TEST 8b |
 
 ## Funzioni eseguibili dai ruoli client (verificato in CI)
 
-- `authenticated`: `admin_override_match`, `admin_release_override`, `is_admin`,
-  `is_group_member`, `is_group_owner`, `matchday_first_kickoff` — le prime due
-  protette dalla guard `is_admin()` interna, l'ultima usata dalle policy di blocco
+Lista esatta (assert `phase2_tests.sql` TEST 8b, fallisce se cambia):
+
+- `authenticated` (10): `admin_lock_matchday`, `admin_override_match`,
+  `admin_release_override`, `group_leaderboard`, `is_admin`, `is_group_member`,
+  `is_group_owner`, `join_group_by_code`, `matchday_first_kickoff`,
+  `save_prediction`
+  - le tre `admin_*` sono protette dalla guard `is_admin()` interna
+  - `group_leaderboard` rifiuta chi non è membro del gruppo (o owner)
+  - `join_group_by_code` e `save_prediction` richiedono `auth.uid()` e
+    verificano il blocco della giornata
+  - `matchday_first_kickoff` è usata dalle policy di blocco
+  - `is_admin`/`is_group_member`/`is_group_owner` sono helper security definer
 - `anon`: nessuna
 - tutto il resto (scoring, sync, cache, lock): solo `service_role`

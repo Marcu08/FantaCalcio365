@@ -141,9 +141,20 @@ fun HomeScreen(vm: AppViewModel, onOpenMatch: (String) -> Unit, onOpenCalendar: 
             ) {
                 Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1.2f)) {
-                        Text(teams[m.homeTeamId]?.name ?: "?", style = MaterialTheme.typography.titleSmall)
-                        Text(teams[m.awayTeamId]?.name ?: "?", style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TeamCrest(teams[m.homeTeamId], Modifier.size(20.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(teams[m.homeTeamId]?.name ?: "?",
+                                style = MaterialTheme.typography.titleSmall)
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TeamCrest(teams[m.awayTeamId], Modifier.size(20.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(teams[m.awayTeamId]?.name ?: "?",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
                         Text(

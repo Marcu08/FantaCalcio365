@@ -1,6 +1,7 @@
 package it.fantacalcio365
 
 import it.fantacalcio365.data.LeaderboardEntry
+import it.fantacalcio365.data.Player
 import it.fantacalcio365.data.Schedina
 import org.junit.Assert.*
 import org.junit.Test
@@ -14,35 +15,49 @@ class RulesTest {
         selected: List<String>, scorers: Set<String>,
     ) = Schedina(selected = selected, scorers = scorers)
 
+    // Squadre derivate dal prefisso dell'id (H = casa, A = ospite)
+    private val playersById = listOf("H1", "H2", "H3", "H4", "A1", "A2", "A3", "A4")
+        .associateWith { id ->
+            Player(
+                id = id,
+                teamId = if (id.startsWith("H")) "HOME" else "AWAY",
+                name = id,
+                position = "TD",
+            )
+        }
+
+    private fun Schedina.isComplete(): Boolean =
+        isComplete("HOME", "AWAY", playersById)
+
     // §5: esattamente 4 giocatori, >=1 casa (prefisso H), >=1 ospite (A)
     @Test
     fun `schedina valida con 4 giocatori e marcatore`() {
         val s = schedina(listOf("H1", "H2", "A1", "A2"), scorers = setOf("H1"))
-        assertTrue(s.isComplete)
+        assertTrue(s.isComplete())
     }
 
     @Test
     fun `schedina incompleta senza marcatore dichiarato`() {
         val s = schedina(listOf("H1", "H2", "A1", "A2"), scorers = emptySet())
-        assertFalse("Serve almeno 1 marcatore dichiarato (decisione approvata)", s.isComplete)
+        assertFalse("Serve almeno 1 marcatore dichiarato (decisione approvata)", s.isComplete())
     }
 
     @Test
     fun `schedina respinta senza giocatore di casa`() {
         val s = schedina(listOf("A1", "A2", "A3", "A4"), scorers = setOf("A1"))
-        assertFalse(s.isComplete)
+        assertFalse(s.isComplete())
     }
 
     @Test
     fun `schedina respinta senza giocatore ospite`() {
         val s = schedina(listOf("H1", "H2", "H3", "H4"), scorers = setOf("H1"))
-        assertFalse(s.isComplete)
+        assertFalse(s.isComplete())
     }
 
     @Test
     fun `schedina respinta con meno di 4 giocatori`() {
         val s = schedina(listOf("H1", "A1"), scorers = setOf("H1"))
-        assertFalse(s.isComplete)
+        assertFalse(s.isComplete())
     }
 
     // §10 (A4): spareggio punti → esatti → marcatori (l'orario si applica a parità totale)

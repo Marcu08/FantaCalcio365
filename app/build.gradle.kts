@@ -59,6 +59,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    // Loghi squadre (TeamCrest): le URL arrivano da teams.logo_url
+    implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("androidx.navigation:navigation-compose:2.8.1")
 
     // Supabase (auth + postgrest + realtime)

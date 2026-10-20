@@ -435,4 +435,48 @@ end $$;
 
 select set_config('role', 'postgres', true);
 
+-- =============================================================
+-- TEST 12 (0012): classifica di gruppo isolata — solo membri
+-- (la classifica GENERALE resta la vista leaderboard, invariata)
+-- =============================================================
+do $$
+declare
+  n int;
+  first_uid uuid;
+begin
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    '{"sub":"dddddddd-0000-0000-0000-000000000002","role":"authenticated"}', true);
+
+  -- il membro vede la classifica con tutti i membri del gruppo
+  select count(*) into n
+  from public.group_leaderboard('99999999-0000-0000-0000-000000000001');
+  perform pg_temp.assert_eq(n, 2::int,
+    'group_leaderboard: membro vede tutti i membri (owner + entrato per codice)');
+
+  -- ordinamento per punti totali decrescente: user2 (50+100) prima di user1 (100)
+  select user_id into first_uid
+  from public.group_leaderboard('99999999-0000-0000-0000-000000000001')
+  limit 1;
+  perform pg_temp.assert_eq(first_uid,
+    'dddddddd-0000-0000-0000-000000000002'::uuid,
+    'group_leaderboard: in testa chi ha piu'' punti totali');
+
+  -- il non-membro viene respinto con eccezione esplicita
+  perform set_config('request.jwt.claims',
+    '{"sub":"dddddddd-0000-0000-0000-000000000009","role":"authenticated"}', true);
+  begin
+    select count(*) into n
+    from public.group_leaderboard('99999999-0000-0000-0000-000000000001');
+    raise exception 'FAIL: non-membro ha letto la classifica del gruppo';
+  exception when raise_exception then
+    if SQLERRM not like 'Non sei membro%' then
+      raise; -- errore FAIL nostro o errore inatteso: propagare
+    end if;
+    raise notice 'PASS: non-membro respinto da group_leaderboard';
+  end;
+end $$;
+
+select set_config('role', 'postgres', true);
+
 rollback;

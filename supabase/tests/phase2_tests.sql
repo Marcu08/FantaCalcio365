@@ -354,8 +354,8 @@ where p.pronamespace = 'public'::regnamespace
 
 select pg_temp.assert_eq(
   (select string_agg(proname, ',' order by proname) from t_exec),
-  'admin_lock_matchday,admin_override_match,admin_release_override,is_admin,is_group_member,is_group_owner,join_group_by_code,matchday_first_kickoff,save_prediction',
-  'Funzioni eseguibili da anon/authenticated = SOLO le 9 attese');
+  'admin_lock_matchday,admin_override_match,admin_release_override,group_leaderboard,is_admin,is_group_member,is_group_owner,join_group_by_code,matchday_first_kickoff,save_prediction',
+  'Funzioni eseguibili da anon/authenticated = SOLO le 10 attese');
 
 -- E le funzioni interne NON sono eseguibili da authenticated
 select pg_temp.assert_eq(

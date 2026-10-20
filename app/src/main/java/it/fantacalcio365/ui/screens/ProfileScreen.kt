@@ -12,7 +12,7 @@ import it.fantacalcio365.ui.AppViewModel
 // Schermate 8+10 — Profilo: punteggi per giornata con spiegazione
 // riga per riga del motivo dei punti (§13)
 @Composable
-fun ProfileScreen(vm: AppViewModel) {
+fun ProfileScreen(vm: AppViewModel, onLogout: () -> Unit = {}, onOpenAdmin: () -> Unit = {}) {
     LaunchedEffect(Unit) { vm.refresh() }
     val profile by vm.profile.collectAsState()
     val scores by vm.scores.collectAsState()
@@ -48,6 +48,16 @@ fun ProfileScreen(vm: AppViewModel) {
         }
 
         Spacer(Modifier.weight(1f))
-        Button(onClick = { vm.logout {} }) { Text("Esci") }
+
+        // Strumenti amministrativi (solo admin)
+        if (profile?.isAdmin == true) {
+            OutlinedButton(onClick = onOpenAdmin, modifier = Modifier.fillMaxWidth()) {
+                Text("Strumenti amministrativi")
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        Button(onClick = { vm.logout { onLogout() } }, modifier = Modifier.fillMaxWidth()) {
+            Text("Esci")
+        }
     }
 }

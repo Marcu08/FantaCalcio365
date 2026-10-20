@@ -122,6 +122,7 @@ fun AppRoot(vm: AppViewModel = viewModel()) {
             composable(Dest.Profile.route) {
                 ProfileScreen(
                     vm = vm,
+                    onLogout = { navController.navigate("auth") { popUpTo(0) } },
                     onOpenAdmin = { navController.navigate("admin") },
                 )
             }

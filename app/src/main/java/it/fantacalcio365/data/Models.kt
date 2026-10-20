@@ -127,9 +127,9 @@ data class Schedina(
 
 @Serializable
 data class Score(
+    @SerialName("match_id") val matchId: String,
+    @SerialName("matchday") val matchday: Int,
     val total: Double,
-    @SerialName("match_id") val matchId: String? = null,
-    val matchday: Int = 0,
     @SerialName("pts_ht") val ptsHt: Int,
     @SerialName("pts_ht2") val ptsHt2: Int,
     @SerialName("pts_scorers") val ptsScorers: Double,
@@ -154,6 +154,13 @@ data class Group(
     val name: String,
     @SerialName("invite_code") val inviteCode: String,
     @SerialName("owner_id") val ownerId: String,
+)
+
+@Serializable
+data class GroupLeaderboardEntry(
+    @SerialName("user_id") val userId: String,
+    val username: String,
+    val total: Double,
 )
 
 @Serializable

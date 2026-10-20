@@ -128,6 +128,12 @@ class Repository {
     suspend fun myGroups(): List<Group> =
         client.postgrest.from("groups").select().decodeList()
 
+    // Classifica isolata del gruppo (RPC security definer: riservata ai membri)
+    suspend fun groupLeaderboard(groupId: String): List<GroupLeaderboardEntry> =
+        client.postgrest.rpc("group_leaderboard", buildJsonObject {
+            put("p_group_id", groupId)
+        }).decodeList()
+
     suspend fun createGroup(name: String): Group {
         val uid = currentUserId() ?: error("Non autenticato")
         return client.postgrest.from("groups").insert(
