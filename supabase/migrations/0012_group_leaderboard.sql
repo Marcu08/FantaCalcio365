@@ -12,11 +12,14 @@ language plpgsql stable security definer
 set search_path = public, pg_temp as $$
 begin
   -- Accesso riservato ai membri del gruppo (o al owner)
+  -- (colonne sempre qualificate: i nomi user_id/username/total sono
+  --  anche parametri OUT della tabella di ritorno)
   if not exists (
-    select 1 from group_members
-    where group_id = p_group_id and user_id = auth.uid()
+    select 1 from group_members gm
+    where gm.group_id = p_group_id and gm.user_id = auth.uid()
   ) and not exists (
-    select 1 from groups where id = p_group_id and owner_id = auth.uid()
+    select 1 from groups g
+    where g.id = p_group_id and g.owner_id = auth.uid()
   ) then
     raise exception 'Non sei membro di questo gruppo';
   end if;
