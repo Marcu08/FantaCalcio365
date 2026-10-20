@@ -36,7 +36,7 @@ Supabase locale) con `supabase/tests/rls_tests.sql` e `phase2_tests.sql`.
 ## Funzioni eseguibili dai ruoli client (verificato in CI)
 
 - `authenticated`: `admin_override_match`, `admin_release_override`, `is_admin`,
-  `is_group_member`, `is_group_owner` — le prime due protette dalla guard
-  `is_admin()` interna
+  `is_group_member`, `is_group_owner`, `matchday_first_kickoff` — le prime due
+  protette dalla guard `is_admin()` interna, l'ultima usata dalle policy di blocco
 - `anon`: nessuna
 - tutto il resto (scoring, sync, cache, lock): solo `service_role`
